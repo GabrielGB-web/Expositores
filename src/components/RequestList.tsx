@@ -22,6 +22,7 @@ export default function RequestList({ isAdmin }: RequestListProps) {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) return;
 
+        // Fetch requests. Using !inner join for profiles to ensure it works, but if join fails we handle it
         let query = supabase
           .from('requests')
           .select(`
@@ -30,7 +31,7 @@ export default function RequestList({ isAdmin }: RequestListProps) {
               name,
               image_url
             ),
-            profiles (
+            profiles!requests_user_id_fkey (
               email
             )
           `);
@@ -96,8 +97,11 @@ export default function RequestList({ isAdmin }: RequestListProps) {
         <p className="text-sm text-[#141414]/60 mb-6">O banco retornou: {error}</p>
         <div className="space-y-4">
           <div className="text-left bg-gray-900 text-green-400 p-4 rounded font-mono text-[9px] overflow-x-auto whitespace-pre">
-            {`-- Execute no SQL Editor do Supabase para corrigir:\n\n` +
-             `CREATE TABLE IF NOT EXISTS requests (id UUID DEFAULT gen_random_uuid() PRIMARY KEY, display_id UUID REFERENCES displays(id), user_id UUID REFERENCES auth.users(id), order_number TEXT, customer_code TEXT, order_value DECIMAL, status TEXT, photo_url TEXT, created_at TIMESTAMPTZ DEFAULT now());\n` +
+            {`-- Cole no SQL Editor do Supabase:\n\n` +
+             `ALTER TABLE requests ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id);\n\n` +
+             `CREATE TABLE IF NOT EXISTS profiles (id UUID PRIMARY KEY REFERENCES auth.users(id), email TEXT, role TEXT DEFAULT 'vendedor');\n\n` +
+             `ALTER TABLE requests DROP CONSTRAINT IF EXISTS requests_user_id_fkey;\n` +
+             `ALTER TABLE requests ADD CONSTRAINT requests_user_id_fkey FOREIGN KEY (user_id) REFERENCES profiles(id);\n\n` +
              `ALTER TABLE requests ENABLE ROW LEVEL SECURITY;\n` +
              `CREATE POLICY "Public" ON requests FOR ALL USING (true) WITH CHECK (true);`}
           </div>
@@ -105,7 +109,7 @@ export default function RequestList({ isAdmin }: RequestListProps) {
             onClick={() => window.location.reload()}
             className="w-full px-8 py-3 bg-[#141414] text-white font-bold uppercase text-xs"
           >
-            Tentar Novamente
+            Sincronizar Agora
           </button>
         </div>
       </div>
