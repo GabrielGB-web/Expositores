@@ -77,7 +77,8 @@ export default function RequestList({ isAdmin }: RequestListProps) {
   const filteredRequests = requests.filter(r => 
     r.display_name?.toLowerCase().includes(filter.toLowerCase()) ||
     r.order_number.toLowerCase().includes(filter.toLowerCase()) ||
-    r.customer_code.toLowerCase().includes(filter.toLowerCase())
+    r.customer_code.toLowerCase().includes(filter.toLowerCase()) ||
+    r.customer_name.toLowerCase().includes(filter.toLowerCase())
   );
 
   if (loading) {
@@ -98,10 +99,11 @@ export default function RequestList({ isAdmin }: RequestListProps) {
         <div className="space-y-4">
           <div className="text-left bg-gray-900 text-green-400 p-4 rounded font-mono text-[9px] overflow-x-auto whitespace-pre">
             {`-- Cole no SQL Editor do Supabase:\n\n` +
-             `ALTER TABLE requests ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id);\n\n` +
+             `CREATE TABLE IF NOT EXISTS requests (id UUID DEFAULT gen_random_uuid() PRIMARY KEY, display_id UUID REFERENCES displays(id), user_id UUID REFERENCES auth.users(id), order_number TEXT, customer_code TEXT, customer_name TEXT, order_value DECIMAL, status TEXT, photo_url TEXT, created_at TIMESTAMPTZ DEFAULT now());\n\n` +
              `CREATE TABLE IF NOT EXISTS profiles (id UUID PRIMARY KEY REFERENCES auth.users(id), email TEXT, role TEXT DEFAULT 'vendedor');\n\n` +
              `ALTER TABLE requests DROP CONSTRAINT IF EXISTS requests_user_id_fkey;\n` +
-             `ALTER TABLE requests ADD CONSTRAINT requests_user_id_fkey FOREIGN KEY (user_id) REFERENCES profiles(id);\n\n` +
+             `ALTER TABLE requests ADD CONSTRAINT requests_user_id_fkey FOREIGN KEY (user_id) REFERENCES profiles(id);\n` +
+             `ALTER TABLE requests ADD CONSTRAINT unique_customer_code UNIQUE (customer_code);\n\n` +
              `ALTER TABLE requests ENABLE ROW LEVEL SECURITY;\n` +
              `CREATE POLICY "Public" ON requests FOR ALL USING (true) WITH CHECK (true);`}
           </div>

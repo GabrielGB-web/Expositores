@@ -17,6 +17,7 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
   const [formData, setFormData] = useState({
     orderNumber: '',
     customerCode: '',
+    customerName: '',
     orderValue: '',
   });
 
@@ -64,13 +65,24 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Sessão expirada. Faça login novamente.");
 
-      // 2. Create request
+      // 2. Check if customer code already exists (Unique constraint check)
+      const { data: existingRequest, error: checkErr } = await supabase
+        .from('requests')
+        .select('id')
+        .eq('customer_code', formData.customerCode)
+        .maybeSingle();
+      
+      if (checkErr) throw new Error("Erro ao validar cliente.");
+      if (existingRequest) throw new Error(`Este Código de Cliente (${formData.customerCode}) já possui uma solicitação ativa.`);
+
+      // 3. Create request
       const { error: err } = await supabase
         .from('requests')
         .insert([{
           display_id: selectedDisplay.id,
           order_number: formData.orderNumber,
           customer_code: formData.customerCode,
+          customer_name: formData.customerName,
           order_value: parseFloat(formData.orderValue),
           status: 'pending',
           user_id: session.user.id
@@ -78,7 +90,7 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
 
       if (err) throw err;
 
-      // 3. Update stock (Manual decrement)
+      // 4. Update stock (Manual decrement)
       await supabase
         .from('displays')
         .update({ stock: display.stock - 1 })
@@ -115,8 +127,8 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
         <div className="space-y-4">
           <div className="text-left bg-gray-900 text-green-400 p-4 rounded font-mono text-[9px] overflow-x-auto whitespace-pre">
             {`-- Cole no SQL Editor do Supabase:\n\n` +
-             `CREATE TABLE IF NOT EXISTS displays (id UUID DEFAULT gen_random_uuid() PRIMARY KEY, name TEXT, stock INTEGER, image_url TEXT);\n` +
-             `CREATE TABLE IF NOT EXISTS profiles (id UUID PRIMARY KEY REFERENCES auth.users(id), email TEXT, role TEXT DEFAULT 'vendedor');\n` +
+             `CREATE TABLE IF NOT EXISTS requests (id UUID DEFAULT gen_random_uuid() PRIMARY KEY, display_id UUID REFERENCES displays(id), user_id UUID REFERENCES auth.users(id), order_number TEXT, customer_code TEXT, customer_name TEXT, order_value DECIMAL, status TEXT, photo_url TEXT, created_at TIMESTAMPTZ DEFAULT now());\n` +
+             `ALTER TABLE requests ADD CONSTRAINT unique_customer_code UNIQUE (customer_code);\n` +
              `ALTER TABLE displays ENABLE ROW LEVEL SECURITY;\n` +
              `CREATE POLICY "Public" ON displays FOR ALL USING (true) WITH CHECK (true);`}
           </div>
@@ -192,7 +204,7 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <div className="space-y-1">
               <label className="text-[10px] font-black uppercase tracking-widest text-[#141414]/40">Número do Pedido</label>
               <input
@@ -203,6 +215,7 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
                 onChange={handleChange}
                 placeholder="EX: #9900"
                 className="w-full border-2 border-[#141414] p-3 font-mono font-bold focus:bg-[#141414]/5 outline-none transition-colors"
+                disabled={loading}
               />
             </div>
 
@@ -216,6 +229,21 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
                 onChange={handleChange}
                 placeholder="EX: CL_123"
                 className="w-full border-2 border-[#141414] p-3 font-mono font-bold focus:bg-[#141414]/5 outline-none transition-colors"
+                disabled={loading}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase tracking-widest text-[#141414]/40">Fantasia (Nome Cliente)</label>
+              <input
+                name="customerName"
+                required
+                type="text"
+                value={formData.customerName}
+                onChange={handleChange}
+                placeholder="NOME DA LOJA"
+                className="w-full border-2 border-[#141414] p-3 font-mono font-bold focus:bg-[#141414]/5 outline-none transition-colors"
+                disabled={loading}
               />
             </div>
 
@@ -230,6 +258,7 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
                 onChange={handleChange}
                 placeholder="0.00"
                 className="w-full border-2 border-[#141414] p-3 font-mono font-bold focus:bg-[#141414]/5 outline-none transition-colors"
+                disabled={loading}
               />
             </div>
           </div>

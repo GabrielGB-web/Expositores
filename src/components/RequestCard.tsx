@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Camera, CheckCircle2, Clock, Tag, Hash, DollarSign, Image as ImageIcon, Loader2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Camera, CheckCircle2, Clock, Tag, Hash, DollarSign, Image as ImageIcon, Loader2, Info, ChevronDown, ChevronUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../lib/supabase';
 import { DisplayRequest } from '../types';
@@ -12,6 +12,15 @@ export interface RequestCardProps {
 const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
   const [uploading, setUploading] = useState(false);
   const [showPhotoPreview, setShowPhotoPreview] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  useEffect(() => {
+    if (showSuccess) {
+      const timer = setTimeout(() => setShowSuccess(false), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [showSuccess]);
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -43,6 +52,7 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
         .eq('id', request.id);
 
       if (updateError) throw updateError;
+      setShowSuccess(true);
     } catch (err) {
       console.error("Update error:", err);
       alert("Falha ao enviar comprovante. Verifique as configurações do Storage no Supabase.");
@@ -61,9 +71,25 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
 
   return (
     <div className={`bg-white border-2 border-[#141414] overflow-hidden transition-all shadow-[6px_6px_0px_0px_rgba(20,20,20,1)] ${request.status === 'delivered' ? 'opacity-90' : ''}`}>
+      <AnimatePresence>
+        {showSuccess && (
+          <motion.div 
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="bg-green-600 text-white p-2 text-center text-[10px] font-black uppercase tracking-[0.2em]"
+          >
+            ✓ Foto Registrada com Sucesso!
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="flex flex-col sm:flex-row h-full">
         {/* Status Bar */}
-        <div className={`w-full sm:w-20 flex sm:flex-col items-center justify-center p-3 text-white border-b sm:border-b-0 sm:border-r border-[#141414] transition-colors ${request.status === 'delivered' ? 'bg-green-600' : 'bg-[#141414]'}`}>
+        <div 
+          onClick={() => setIsExpanded(!isExpanded)}
+          className={`w-full sm:w-20 flex sm:flex-col items-center justify-center p-3 text-white border-b sm:border-b-0 sm:border-r border-[#141414] transition-colors cursor-pointer group ${request.status === 'delivered' ? 'bg-green-600' : 'bg-[#141414]'}`}
+        >
           {isAdmin && request.user_email && (
              <div className="hidden sm:block absolute top-2 left-0 w-full text-center px-1">
                 <span className="text-[7px] font-black uppercase opacity-50 block leading-tight">{request.user_email.split('@')[0]}</span>
@@ -77,10 +103,16 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
           <span className="text-[9px] sm:vertical-rl sm:rotate-180 uppercase font-black tracking-[0.2em] ml-3 sm:ml-0 sm:mt-6 whitespace-nowrap">
             {request.status === 'delivered' ? 'Concluído' : 'Aguardando'}
           </span>
+          <div className="sm:mt-auto pt-2 hidden sm:block opacity-0 group-hover:opacity-100 transition-opacity">
+            {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </div>
         </div>
 
         {/* Info Grid */}
-        <div className="flex-1 p-6 grid grid-cols-1 sm:grid-cols-2 gap-8 relative">
+        <div 
+          className="flex-1 p-6 grid grid-cols-1 sm:grid-cols-2 gap-8 relative cursor-pointer"
+          onClick={() => setIsExpanded(!isExpanded)}
+        >
           <div className="space-y-4">
             <div className="flex items-start gap-4">
                {request.display_image && (
@@ -90,6 +122,9 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
                )}
                <div>
                   <h3 className="font-black text-lg uppercase leading-none tracking-tighter">{request.display_name}</h3>
+                  <div className="mt-1 font-mono text-[10px] font-black uppercase text-blue-600 tracking-wider">
+                    {request.customer_name}
+                  </div>
                   <div className="flex items-center gap-1.5 text-[#141414]/40 font-mono text-[9px] uppercase mt-2 font-bold italic">
                     SOLICITADO EM {formattedDate}
                   </div>
@@ -117,7 +152,7 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
             </div>
           </div>
 
-          <div className="flex flex-col justify-end space-y-4">
+          <div className="flex flex-col justify-end space-y-4" onClick={e => e.stopPropagation()}>
             {request.status === 'pending' ? (
               <div className="relative">
                 <input
@@ -166,6 +201,36 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
       </div>
 
       <AnimatePresence>
+        {isExpanded && request.display_image && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="border-t-2 border-[#141414] bg-[#F9F9F8] p-6"
+          >
+            <div className="flex flex-col md:flex-row gap-6">
+              <div className="w-full md:w-1/3 aspect-square bg-white border-2 border-[#141414] overflow-hidden shadow-[4px_4px_0px_0px_rgba(20,20,20,0.1)]">
+                <img src={request.display_image} alt={request.display_name} className="w-full h-full object-contain p-2" />
+              </div>
+              <div className="flex-1 space-y-4">
+                <div className="flex items-center gap-2">
+                  <Info className="w-4 h-4 text-[#141414]" />
+                  <span className="font-black uppercase text-xs tracking-widest text-[#141414]">Detalhes do Expositor</span>
+                </div>
+                <p className="text-xs font-bold text-[#141414]/60 leading-relaxed max-w-lg">
+                  Este é o modelo de expositor solicitado para o cliente. Certifique-se de que a montagem/entrega corresponde a este padrão visual antes de registrar a foto de comprovação.
+                </p>
+                <div className="bg-white border-l-4 border-[#141414] p-3">
+                  <span className="block text-[8px] font-black uppercase text-[#141414]/40 mb-1">Identificação Interna</span>
+                  <span className="font-mono text-[10px] font-bold text-[#141414]">{request.display_id}</span>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {showPhotoPreview && request.photo_url && (
           <motion.div 
             initial={{ opacity: 0 }}
@@ -188,9 +253,10 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
               <div className="bg-gray-100 aspect-video overflow-hidden">
                  <img src={request.photo_url} alt="Large Proof" className="w-full h-full object-contain" />
               </div>
-              <div className="p-4 flex items-center gap-4 text-[10px] font-mono text-[#141414]/60 font-bold uppercase">
+              <div className="p-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-[10px] font-mono text-[#141414]/60 font-bold uppercase">
                 <span>Pedido: {request.order_number}</span>
                 <span>Cliente: {request.customer_code}</span>
+                <span className="text-[#141414]">{request.customer_name}</span>
                 <span className="ml-auto">Entrega: {deliveredDate}</span>
               </div>
             </motion.div>

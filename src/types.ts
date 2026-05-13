@@ -21,6 +21,7 @@ export interface DisplayRequest {
   display_image?: string;
   order_number: string;
   customer_code: string;
+  customer_name: string;
   order_value: number;
   status: RequestStatus;
   photo_url?: string;
