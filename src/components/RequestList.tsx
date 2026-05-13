@@ -29,6 +29,7 @@ export default function RequestList({ isAdmin }: RequestListProps) {
             *,
             displays (
               name,
+              code,
               image_url
             ),
             profiles!requests_user_id_fkey (
@@ -47,6 +48,7 @@ export default function RequestList({ isAdmin }: RequestListProps) {
         const formatted = (data || []).map(r => ({
           ...r,
           display_name: (r as any).displays?.name,
+          display_code: (r as any).displays?.code,
           display_image: (r as any).displays?.image_url,
           user_email: (r as any).profiles?.email
         }));

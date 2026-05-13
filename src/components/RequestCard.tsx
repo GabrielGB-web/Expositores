@@ -220,9 +220,17 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
                 <p className="text-xs font-bold text-[#141414]/60 leading-relaxed max-w-lg">
                   Este é o modelo de expositor solicitado para o cliente. Certifique-se de que a montagem/entrega corresponde a este padrão visual antes de registrar a foto de comprovação.
                 </p>
-                <div className="bg-white border-l-4 border-[#141414] p-3">
-                  <span className="block text-[8px] font-black uppercase text-[#141414]/40 mb-1">Identificação Interna</span>
-                  <span className="font-mono text-[10px] font-bold text-[#141414]">{request.display_id}</span>
+                <div className="bg-white border-l-4 border-[#141414] p-3 flex justify-between items-center">
+                  <div>
+                    <span className="block text-[8px] font-black uppercase text-[#141414]/40 mb-1">Identificação Interna</span>
+                    <span className="font-mono text-[10px] font-bold text-[#141414]">{request.display_id}</span>
+                  </div>
+                  {request.display_code && (
+                    <div className="text-right">
+                      <span className="block text-[8px] font-black uppercase text-[#141414]/40 mb-1">Cód. Catálogo</span>
+                      <span className="font-mono text-[10px] font-black bg-[#141414] text-white px-2 py-0.5">{request.display_code}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

@@ -175,7 +175,8 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
                   className="w-full h-full object-cover"
                 />
               </div>
-              <p className="text-xs font-black uppercase leading-none mb-2 truncate">{display.name}</p>
+              <p className="text-xs font-black uppercase leading-none mb-1 truncate">{display.name}</p>
+              <p className="text-[9px] font-mono font-black text-[#141414]/40 mt-1 mb-2">COD: {display.code || '---'}</p>
               <div className="flex items-center justify-between mt-auto">
                 <span className={`text-[9px] font-mono font-black border px-1 ${
                    display.stock > 0 ? 'bg-green-100 text-green-800 border-green-200' : 'bg-red-100 text-red-800 border-red-200'

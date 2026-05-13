@@ -9,8 +9,10 @@ export default function DisplayManager() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [editId, setEditId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
+    code: '',
     stock: 0,
     image: null as File | null,
     imageUrlPreview: ''
@@ -48,10 +50,27 @@ export default function DisplayManager() {
     }
   };
 
-  const handleAddDisplay = async (e: React.FormEvent) => {
+  const handleEdit = (display: Display) => {
+    setEditId(display.id);
+    setFormData({
+      name: display.name,
+      code: display.code || '',
+      stock: display.stock,
+      image: null,
+      imageUrlPreview: display.image_url
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleCancelEdit = () => {
+    setEditId(null);
+    setFormData({ name: '', code: '', stock: 0, image: null, imageUrlPreview: '' });
+  };
+
+  const handleSaveDisplay = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.image) {
-      alert("Preencha o nome e selecione uma imagem.");
+    if (!formData.name) {
+      alert("Preencha o nome.");
       return;
     }
 
@@ -59,34 +78,55 @@ export default function DisplayManager() {
     setError(null);
 
     try {
-      // 1. Upload image
-      const fileExt = formData.image.name.split('.').pop();
-      const fileName = `${Date.now()}.${fileExt}`;
-      const filePath = `catalog/${fileName}`;
+      let publicUrl = formData.imageUrlPreview;
 
-      const { error: uploadError } = await supabase.storage
-        .from('catalog')
-        .upload(filePath, formData.image);
+      // 1. Upload new image if selected
+      if (formData.image) {
+        const fileExt = formData.image.name.split('.').pop();
+        const fileName = `${Date.now()}.${fileExt}`;
+        const filePath = `catalog/${fileName}`;
 
-      if (uploadError) throw uploadError;
+        const { error: uploadError } = await supabase.storage
+          .from('catalog')
+          .upload(filePath, formData.image);
 
-      const { data: { publicUrl } } = supabase.storage
-        .from('catalog')
-        .getPublicUrl(filePath);
+        if (uploadError) throw uploadError;
 
-      // 2. Insert into DB
-      const { error: insertError } = await supabase
-        .from('displays')
-        .insert([{
-          name: formData.name,
-          stock: formData.stock,
-          image_url: publicUrl
-        }]);
+        const { data: { publicUrl: newUrl } } = supabase.storage
+          .from('catalog')
+          .getPublicUrl(filePath);
+        
+        publicUrl = newUrl;
+      }
 
-      if (insertError) throw insertError;
+      const displayData = {
+        name: formData.name,
+        code: formData.code,
+        stock: formData.stock,
+        image_url: publicUrl
+      };
+
+      if (editId) {
+        // Update
+        const { error: updateError } = await supabase
+          .from('displays')
+          .update(displayData)
+          .eq('id', editId);
+        
+        if (updateError) throw updateError;
+      } else {
+        // Insert
+        if (!formData.image) throw new Error("Imagem é obrigatória para novos cadastros.");
+        
+        const { error: insertError } = await supabase
+          .from('displays')
+          .insert([displayData]);
+
+        if (insertError) throw insertError;
+      }
 
       // 3. Reset form
-      setFormData({ name: '', stock: 0, image: null, imageUrlPreview: '' });
+      handleCancelEdit();
       fetchDisplays();
     } catch (err: any) {
       console.error(err);
@@ -128,10 +168,10 @@ export default function DisplayManager() {
       <section className="bg-white border-2 border-[#141414] p-6 shadow-[8px_8px_0px_0px_rgba(20,20,20,1)]">
         <h2 className="text-xl font-black uppercase tracking-tighter mb-6 flex items-center gap-2 border-b-2 border-[#141414] pb-4">
           <Plus className="w-5 h-5" />
-          Cadastrar Novo Modelo de Expositor
+          {editId ? 'Editar Modelo de Expositor' : 'Cadastrar Novo Modelo de Expositor'}
         </h2>
 
-        <form onSubmit={handleAddDisplay} className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <form onSubmit={handleSaveDisplay} className="grid grid-cols-1 md:grid-cols-3 gap-8">
           {/* Photo Dropzone */}
           <div className="space-y-2">
             <label className="text-[10px] font-black uppercase tracking-widest text-[#141414]/40">Foto do Produto</label>
@@ -168,7 +208,17 @@ export default function DisplayManager() {
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-black uppercase tracking-widest text-[#141414]/40">Quantidade Inicial</label>
+                <label className="text-[10px] font-black uppercase tracking-widest text-[#141414]/40">Código do Expositor</label>
+                <input 
+                  type="text" 
+                  placeholder="EX: EXP-001"
+                  value={formData.code}
+                  onChange={e => setFormData(p => ({ ...p, code: e.target.value }))}
+                  className="w-full border-2 border-[#141414] p-3 font-mono font-bold uppercase text-sm focus:bg-[#141414]/5 outline-none"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-[#141414]/40">Quantidade em Estoque</label>
                 <input 
                   type="number" 
                   min="0"
@@ -195,6 +245,7 @@ export default function DisplayManager() {
                     ALTER TABLE requests ADD CONSTRAINT requests_display_id_fkey \n
                     FOREIGN KEY (display_id) REFERENCES displays(id) ON DELETE CASCADE;\n\n
                     -- Configurar Tabelas (se necessário):\n
+                    ALTER TABLE displays ADD COLUMN IF NOT EXISTS code TEXT;\n
                     ALTER TABLE displays ENABLE ROW LEVEL SECURITY;\n
                     CREATE POLICY "Public" ON displays FOR ALL USING (true) WITH CHECK (true);
                   </p>
@@ -202,13 +253,24 @@ export default function DisplayManager() {
               </div>
             )}
 
-            <button 
-              type="submit"
-              disabled={saving}
-              className="w-full py-5 bg-[#141414] text-white font-black uppercase tracking-[0.3em] text-xs shadow-[6px_6px_0px_0px_rgba(20,20,20,0.3)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all disabled:opacity-50"
-            >
-              {saving ? 'Guardando Informações...' : 'Adicionar ao Catálogo'}
-            </button>
+            <div className="flex flex-col gap-4">
+              <button 
+                type="submit"
+                disabled={saving}
+                className="w-full py-5 bg-[#141414] text-white font-black uppercase tracking-[0.3em] text-xs shadow-[6px_6px_0px_0px_rgba(20,20,20,0.3)] hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all disabled:opacity-50"
+              >
+                {saving ? 'Guardando Informações...' : (editId ? 'Atualizar Expositor' : 'Adicionar ao Catálogo')}
+              </button>
+              {editId && (
+                <button 
+                  type="button"
+                  onClick={handleCancelEdit}
+                  className="w-full py-3 border-2 border-[#141414] text-[#141414] font-black uppercase tracking-[0.2em] text-[10px] hover:bg-gray-50 transition-all"
+                >
+                  Cancelar Edição
+                </button>
+              )}
+            </div>
           </div>
         </form>
       </section>
@@ -232,16 +294,31 @@ export default function DisplayManager() {
                 <img src={display.image_url} alt={display.name} className="w-full h-full object-cover" />
               </div>
               <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h4 className="font-black uppercase text-xs tracking-tight line-clamp-1">{display.name}</h4>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-black uppercase text-xs tracking-tight line-clamp-1">{display.name}</h4>
+                    {display.code && (
+                      <span className="text-[8px] font-mono font-black bg-[#141414] text-white px-1 py-0.5">{display.code}</span>
+                    )}
+                  </div>
                   <p className="font-mono text-[10px] font-bold text-green-700 bg-green-50 inline-block px-1 mt-1">ESTOQUE: {display.stock}</p>
                 </div>
-                <button 
-                  onClick={() => handleDelete(display.id)}
-                  className="p-2 text-[#141414]/20 hover:text-red-600 transition-colors"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button 
+                    onClick={() => handleEdit(display)}
+                    className="p-2 text-[#141414]/20 hover:text-blue-600 transition-colors"
+                    title="Editar"
+                  >
+                    <Plus className="w-4 h-4 rotate-45" />
+                  </button>
+                  <button 
+                    onClick={() => handleDelete(display.id)}
+                    className="p-2 text-[#141414]/20 hover:text-red-600 transition-colors"
+                    title="Remover"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
           ))}
