@@ -110,19 +110,21 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
     return (
       <div className="bg-white border-2 border-[#141414] p-8 shadow-[8px_8px_0px_0px_rgba(20,20,20,1)] text-center">
         <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-        <h3 className="font-black text-lg uppercase tracking-tighter mb-2">Erro de Configuração</h3>
-        <p className="text-sm text-[#141414]/60 mb-6">{error}</p>
+        <h3 className="font-black text-lg uppercase tracking-tighter mb-2">Configuração do Banco Pendente</h3>
+        <p className="text-sm text-[#141414]/60 mb-6">As tabelas ou permissões não foram encontradas no Supabase.</p>
         <div className="space-y-4">
-          <p className="text-[10px] uppercase font-bold text-red-700 bg-red-50 p-4 text-left whitespace-pre-wrap font-mono">
-            Execute no SQL Editor do Supabase:\n\n
-            ALTER TABLE displays ENABLE ROW LEVEL SECURITY;\n
-            CREATE POLICY "Public" ON displays FOR ALL USING (true) WITH CHECK (true);
-          </p>
+          <div className="text-left bg-gray-900 text-green-400 p-4 rounded font-mono text-[9px] overflow-x-auto whitespace-pre">
+            {`-- Cole no SQL Editor do Supabase:\n\n` +
+             `CREATE TABLE IF NOT EXISTS displays (id UUID DEFAULT gen_random_uuid() PRIMARY KEY, name TEXT, stock INTEGER, image_url TEXT);\n` +
+             `CREATE TABLE IF NOT EXISTS profiles (id UUID PRIMARY KEY REFERENCES auth.users(id), email TEXT, role TEXT DEFAULT 'vendedor');\n` +
+             `ALTER TABLE displays ENABLE ROW LEVEL SECURITY;\n` +
+             `CREATE POLICY "Public" ON displays FOR ALL USING (true) WITH CHECK (true);`}
+          </div>
           <button 
             onClick={() => window.location.reload()}
-            className="px-8 py-3 bg-[#141414] text-white font-bold uppercase text-xs"
+            className="w-full px-8 py-3 bg-[#141414] text-white font-bold uppercase text-xs"
           >
-            Tentar Novamente
+            Sincronizar Agora
           </button>
         </div>
       </div>
