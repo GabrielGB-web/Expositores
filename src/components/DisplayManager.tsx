@@ -101,10 +101,15 @@ export default function DisplayManager() {
     
     try {
       const { error: err } = await supabase.from('displays').delete().eq('id', id);
-      if (err) throw err;
+      if (err) {
+        if (err.message.includes('foreign key constraint')) {
+          throw new Error("Não é possível excluir este expositor pois existem pedidos vinculados a ele. Exclua os pedidos primeiro ou execute o comando SQL de CASCADE.");
+        }
+        throw err;
+      }
       fetchDisplays();
     } catch (err: any) {
-      alert("Erro ao excluir: " + err.message);
+      alert(err.message);
     }
   };
 
@@ -182,22 +187,16 @@ export default function DisplayManager() {
                   <AlertCircle className="text-red-500 w-5 h-5 shrink-0 mt-0.5" />
                   <p className="text-red-700 text-xs font-bold">{error}</p>
                 </div>
-                {error.includes("row-level security") && (
-                  <p className="text-[10px] uppercase font-bold text-red-700 bg-white p-3 border border-red-200 text-left whitespace-pre-wrap font-mono">
+                {(error.includes("row-level security") || error.includes("foreign key")) && (
+                  <p className="text-[10px] uppercase font-bold text-red-700 bg-white p-3 border border-red-200 text-left whitespace-pre-wrap font-mono leading-relaxed">
                     Execute no SQL Editor do Supabase:\n\n
-                    -- 1. Tabelas Base\n
+                    -- Corrigir Remoção com Pedidos Ativos:\n
+                    ALTER TABLE requests DROP CONSTRAINT IF EXISTS requests_display_id_fkey;\n
+                    ALTER TABLE requests ADD CONSTRAINT requests_display_id_fkey \n
+                    FOREIGN KEY (display_id) REFERENCES displays(id) ON DELETE CASCADE;\n\n
+                    -- Configurar Tabelas (se necessário):\n
                     ALTER TABLE displays ENABLE ROW LEVEL SECURITY;\n
-                    CREATE POLICY "Public" ON displays FOR ALL USING (true) WITH CHECK (true);\n\n
-                    -- 2. Perfis e Regras\n
-                    CREATE TABLE profiles (id UUID PRIMARY KEY REFERENCES auth.users(id), email TEXT, role TEXT DEFAULT 'vendedor');\n
-                    ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;\n
-                    CREATE POLICY "Profiles Public" ON profiles FOR ALL USING (true) WITH CHECK (true);\n\n
-                    -- 3. Storage\n
-                    CREATE POLICY "Public Access" ON storage.objects FOR ALL USING (true) WITH CHECK (true);\n\n
-                    -- 4. Requests (Adicionar user_id)\n
-                    ALTER TABLE requests ADD COLUMN user_id UUID REFERENCES auth.users(id);\n
-                    ALTER TABLE requests ENABLE ROW LEVEL SECURITY;\n
-                    CREATE POLICY "Requests ALL" ON requests FOR ALL USING (true) WITH CHECK (true);
+                    CREATE POLICY "Public" ON displays FOR ALL USING (true) WITH CHECK (true);
                   </p>
                 )}
               </div>
