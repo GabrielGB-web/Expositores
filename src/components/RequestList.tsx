@@ -14,65 +14,72 @@ export default function RequestList({ isAdmin }: RequestListProps) {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>('');
 
-  useEffect(() => {
-    async function fetchRequests() {
-      try {
-        setLoading(true);
-        setError(null);
-        
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) return;
+  async function fetchRequests() {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
 
-        // Consulta simplificada e resiliente
-        const { data, error: fetchErr } = await supabase
-          .from('requests')
-          .select('*, displays(name, code, image_url), profiles(email)');
+      // Consulta simplificada e resiliente
+      const { data, error: fetchErr } = await supabase
+        .from('requests')
+        .select('*, displays(name, code, image_url), profiles(email)')
+        .order('created_at', { ascending: false });
 
-        if (fetchErr) {
-          // Fallback final: se a busca com joins falhar, tenta carregar pelo menos os dados básicos
-          const { data: fallbackData, error: fallbackErr } = await supabase
-            .from('requests')
-            .select('*');
-          
-          if (fallbackErr) throw fallbackErr;
-          
-          const formatted = (fallbackData || []).map(r => ({
-            ...r,
-            display_name: 'Carregando...',
-            display_code: '---',
-            user_email: 'Sincronizando...'
-          }));
-          setRequests(formatted as DisplayRequest[]);
-        } else {
-          const formatted = (data || []).map(r => ({
-            ...r,
-            display_name: (r as any).displays?.name || 'Expositor Removido',
-            display_code: (r as any).displays?.code || '---',
-            display_image: (r as any).displays?.image_url,
-            user_email: (r as any).profiles?.email || 'Vendedor'
-          }));
-          
-          // Se não for admin, filtra localmente para garantir segurança se o RLS falhar
-          const finalData = isAdmin ? formatted : formatted.filter(r => r.user_id === session.user.id);
-          setRequests(finalData as DisplayRequest[]);
-        }
-      } catch (err: any) {
-        console.error("Error fetching requests:", err);
-        setError("Erro ao carregar solicitações. Tente atualizar a página.");
-      } finally {
-        setLoading(false);
+      if (fetchErr) {
+        throw fetchErr;
       }
+      
+      const formatted = (data || []).map(r => ({
+        ...r,
+        display_name: (r as any).displays?.name || 'Expositor Removido',
+        display_code: (r as any).displays?.code || '---',
+        display_image: (r as any).displays?.image_url,
+        user_email: (r as any).profiles?.email || 'Vendedor'
+      }));
+      
+      // Se não for admin, filtra localmente para garantir segurança se o RLS falhar
+      const finalData = isAdmin ? formatted : formatted.filter(r => r.user_id === session.user.id);
+      setRequests(finalData as DisplayRequest[]);
+    } catch (err: any) {
+      console.error("Error fetching requests:", err);
+      // Fallback final: se a busca com joins falhar, tenta carregar pelo menos os dados básicos
+      try {
+        const { data: fallbackData } = await supabase
+          .from('requests')
+          .select('*')
+          .order('created_at', { ascending: false });
+        
+        const formatted = (fallbackData || []).map(r => ({
+          ...r,
+          display_name: 'Carregando...',
+          display_code: '---',
+          user_email: 'Sincronizando...'
+        }));
+        setRequests(formatted as DisplayRequest[]);
+      } catch (innerErr) {
+        setError("Erro ao carregar solicitações. Tente atualizar a página.");
+      }
+    } finally {
+      setLoading(false);
     }
+  }
 
+  useEffect(() => {
     fetchRequests();
 
     // Inscrição em tempo real para atualizações automáticas
     const channel = supabase
       .channel('requests_db_changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'requests' }, () => {
+        console.log("Realtime: Mudança detectada, atualizando lista...");
         fetchRequests();
       })
-      .subscribe();
+      .subscribe((status) => {
+        console.log("Realtime: Status da conexão:", status);
+      });
 
     return () => {
       supabase.removeChannel(channel);
@@ -126,9 +133,18 @@ export default function RequestList({ isAdmin }: RequestListProps) {
             className="w-full pl-10 pr-4 py-3 border-2 border-[#141414]/10 focus:border-[#141414] outline-none font-mono font-bold text-sm transition-all"
           />
         </div>
-        <div className="flex items-center gap-2 px-4 py-2 border-2 border-[#141414] bg-[#141414] text-white text-[10px] font-black uppercase tracking-widest">
-          <Filter className="w-3 h-3" />
-          {filteredRequests.length} Registros
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={() => fetchRequests()}
+            className="px-4 py-2 border-2 border-[#141414] hover:bg-[#141414] hover:text-white transition-all text-[10px] font-black uppercase tracking-widest flex items-center gap-2 bg-white"
+          >
+            <Loader2 className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+            Sincronizar
+          </button>
+          <div className="flex items-center gap-2 px-4 py-2 border-2 border-[#141414] bg-[#141414] text-white text-[10px] font-black uppercase tracking-widest">
+            <Filter className="w-3 h-3" />
+            {filteredRequests.length} Registros
+          </div>
         </div>
       </div>
 
@@ -141,7 +157,12 @@ export default function RequestList({ isAdmin }: RequestListProps) {
           </div>
         ) : (
           filteredRequests.map(request => (
-            <RequestCard key={request.id} request={request} isAdmin={isAdmin} />
+            <RequestCard 
+              key={request.id} 
+              request={request} 
+              isAdmin={isAdmin} 
+              onStatusChange={fetchRequests}
+            />
           ))
         )}
       </div>

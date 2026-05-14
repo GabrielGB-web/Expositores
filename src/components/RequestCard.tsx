@@ -7,9 +7,10 @@ import { DisplayRequest } from '../types';
 export interface RequestCardProps {
   request: DisplayRequest;
   isAdmin?: boolean;
+  onStatusChange?: () => void;
 }
 
-const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
+const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin, onStatusChange }) => {
   const [uploading, setUploading] = useState(false);
   const [showPhotoPreview, setShowPhotoPreview] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -28,9 +29,28 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
         .delete()
         .eq('id', request.id);
       if (error) throw error;
-      alert("Registro excluído.");
+      if (onStatusChange) onStatusChange();
     } catch (err: any) {
       alert("Erro ao excluir: " + err.message);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleStatusUpdate = async (newStatus: 'approved' | 'rejected' | 'pending') => {
+    if (!isAdmin) return;
+    
+    setProcessing(true);
+    try {
+      const { error } = await supabase
+        .from('requests')
+        .update({ status: newStatus })
+        .eq('id', request.id);
+
+      if (error) throw error;
+      if (onStatusChange) onStatusChange();
+    } catch (err: any) {
+      alert("Erro ao atualizar status: " + err.message);
     } finally {
       setProcessing(false);
     }
@@ -73,6 +93,7 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
 
       if (updateError) throw updateError;
       setShowSuccess(true);
+      if (onStatusChange) onStatusChange();
     } catch (err) {
       console.error("Update error:", err);
       alert("Falha ao enviar comprovante. Verifique as configurações do Storage no Supabase.");
@@ -199,6 +220,36 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
             
             {request.status !== 'delivered' && request.status !== 'rejected' ? (
               <div className="space-y-2">
+                {/* Admin Controls */}
+                {isAdmin && request.status === 'pending' && (
+                  <div className="grid grid-cols-2 gap-2 mb-4">
+                    <button 
+                      onClick={() => handleStatusUpdate('approved')}
+                      disabled={processing}
+                      className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white py-3 font-black uppercase text-[10px] transition-all tracking-widest border-2 border-[#141414] shadow-[3px_3px_0px_0px_rgba(20,20,20,1)] active:shadow-none active:translate-x-0.5 active:translate-y-0.5"
+                    >
+                      {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ThumbsUp className="w-4 h-4" />}
+                      Aprovar
+                    </button>
+                    <button 
+                      onClick={() => handleStatusUpdate('rejected')}
+                      disabled={processing}
+                      className="flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white py-3 font-black uppercase text-[10px] transition-all tracking-widest border-2 border-[#141414] shadow-[3px_3px_0px_0px_rgba(20,20,20,1)] active:shadow-none active:translate-x-0.5 active:translate-y-0.5"
+                    >
+                      {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ThumbsDown className="w-4 h-4" />}
+                      Reprovar
+                    </button>
+                  </div>
+                )}
+
+                {/* Status indicator for non-admins or special cases */}
+                {!isAdmin && request.status === 'pending' && (
+                   <div className="bg-[#141414]/5 border-2 border-[#141414]/10 p-3 flex items-center justify-center gap-2 mb-2">
+                      <Clock className="w-4 h-4 text-[#141414]/40" />
+                      <span className="text-[10px] font-black uppercase text-[#141414]/60 tracking-widest">Aguardando Avaliação</span>
+                   </div>
+                )}
+
                 <div className="relative">
                   <input
                     type="file"
@@ -206,11 +257,15 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
                     capture="environment"
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
                     onChange={handlePhotoUpload}
-                    disabled={uploading}
+                    disabled={uploading || (request.status === 'pending' && !isAdmin)}
                   />
                   <button 
-                    disabled={uploading}
-                    className="w-full flex items-center justify-center gap-4 bg-[#E4E3E0] hover:bg-[#141414] hover:text-white border-4 border-[#141414] py-5 font-black uppercase text-xs transition-all tracking-[0.2em] shadow-[4px_4px_0px_0px_rgba(20,20,20,0.1)] hover:shadow-none hover:translate-x-1 hover:translate-y-1"
+                    disabled={uploading || (request.status === 'pending' && !isAdmin)}
+                    className={`w-full flex items-center justify-center gap-4 border-4 border-[#141414] py-5 font-black uppercase text-xs transition-all tracking-[0.2em] shadow-[4px_4px_0px_0px_rgba(20,20,20,0.1)] hover:shadow-none hover:translate-x-1 hover:translate-y-1 ${
+                      (request.status === 'pending' && !isAdmin) 
+                      ? 'bg-gray-100 text-[#141414]/20 border-gray-200 cursor-not-allowed shadow-none' 
+                      : 'bg-[#E4E3E0] hover:bg-[#141414] hover:text-white'
+                    }`}
                   >
                     {uploading ? (
                       <Loader2 className="w-5 h-5 animate-spin" />
