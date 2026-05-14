@@ -244,6 +244,7 @@ export default function DisplayManager() {
                     ALTER TABLE requests DROP CONSTRAINT IF EXISTS requests_display_id_fkey;\n
                     ALTER TABLE requests ADD CONSTRAINT requests_display_id_fkey \n
                     FOREIGN KEY (display_id) REFERENCES displays(id) ON DELETE CASCADE;\n\n
+                    ALTER TABLE requests ADD COLUMN IF NOT EXISTS customer_name TEXT;\n\n
                     -- Configurar Tabelas (se necessário):\n
                     ALTER TABLE displays ADD COLUMN IF NOT EXISTS code TEXT;\n
                     ALTER TABLE displays ENABLE ROW LEVEL SECURITY;\n

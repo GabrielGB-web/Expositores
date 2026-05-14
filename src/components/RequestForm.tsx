@@ -127,6 +127,8 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
         <div className="space-y-4">
           <div className="text-left bg-gray-900 text-green-400 p-4 rounded font-mono text-[9px] overflow-x-auto whitespace-pre">
             {`-- Cole no SQL Editor do Supabase:\n\n` +
+             `ALTER TABLE requests ADD COLUMN IF NOT EXISTS customer_name TEXT;\n` +
+             `ALTER TABLE requests ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id);\n\n` +
              `CREATE TABLE IF NOT EXISTS requests (id UUID DEFAULT gen_random_uuid() PRIMARY KEY, display_id UUID REFERENCES displays(id), user_id UUID REFERENCES auth.users(id), order_number TEXT, customer_code TEXT, customer_name TEXT, order_value DECIMAL, status TEXT, photo_url TEXT, created_at TIMESTAMPTZ DEFAULT now());\n` +
              `ALTER TABLE requests ADD CONSTRAINT unique_customer_code UNIQUE (customer_code);\n` +
              `ALTER TABLE displays ENABLE ROW LEVEL SECURITY;\n` +
