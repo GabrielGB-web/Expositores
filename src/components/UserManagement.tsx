@@ -37,8 +37,8 @@ const UserManagement: React.FC = () => {
     setIsCreatingUser(true);
     try {
       // Criamos um client temporário SEM persistência de sessão para não deslogar o Admin
-      const supabaseUrl = (import.meta as any).env.VITE_SUPABASE_URL;
-      const supabaseAnonKey = (import.meta as any).env.VITE_SUPABASE_ANON_KEY;
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
+      const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || '';
 
       const tempClient = createClient(supabaseUrl, supabaseAnonKey, { 
         auth: { persistSession: false } 
