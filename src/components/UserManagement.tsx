@@ -324,20 +324,25 @@ BEGIN
     LOOP EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(pol.policyname) || ' ON ' || quote_ident(pol.tablename); END LOOP;
 END $$;
 
--- 3. Recriação das regras administrativas (Check Direto no JWT - Sem Recursão)
+-- 3. Correção do Erro de Constraint (Permite Status 'approved')
+ALTER TABLE requests DROP CONSTRAINT IF EXISTS requests_status_check;
+ALTER TABLE requests ADD CONSTRAINT requests_status_check 
+CHECK (status IN ('pending', 'approved', 'delivered', 'rejected'));
+
+-- 4. Recriação das regras administrativas (SEM RECURSÃO)
 -- ADM PROFILE: ACESSO TOTAL
-CREATE POLICY "adm_master_profiles_v3" ON profiles FOR ALL 
+CREATE POLICY "adm_master_profiles_v4" ON profiles FOR ALL 
 USING (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com'));
 
 -- ADM REQUESTS: ACESSO TOTAL
-CREATE POLICY "adm_master_requests_v3" ON requests FOR ALL 
+CREATE POLICY "adm_master_requests_v4" ON requests FOR ALL 
 USING (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com'));
 
 -- VENDEDORES: ACESSO RESTRITO
 CREATE POLICY "vendedor_view_profile" ON profiles FOR SELECT USING (auth.uid() = id);
 CREATE POLICY "vendedor_manage_requests" ON requests FOR ALL USING (auth.uid() = user_id);
 
--- 4. Reativação Manual (Importante rodar)
+-- 5. Reativação Manual (Importante rodar)
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE requests ENABLE ROW LEVEL SECURITY;`}
                   </pre>

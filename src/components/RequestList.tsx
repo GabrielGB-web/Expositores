@@ -14,9 +14,9 @@ export default function RequestList({ isAdmin }: RequestListProps) {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>('');
 
-  async function fetchRequests() {
+  async function fetchRequests(isInitial = false) {
     try {
-      setLoading(true);
+      if (isInitial) setLoading(true);
       setError(null);
       
       const { data: { session } } = await supabase.auth.getSession();
@@ -45,7 +45,7 @@ export default function RequestList({ isAdmin }: RequestListProps) {
       setRequests(finalData as DisplayRequest[]);
     } catch (err: any) {
       console.error("Error fetching requests:", err);
-      // Fallback final: se a busca com joins falhar, tenta carregar pelo menos os dados básicos
+      // Fallback final
       try {
         const { data: fallbackData } = await supabase
           .from('requests')
@@ -63,23 +63,25 @@ export default function RequestList({ isAdmin }: RequestListProps) {
         setError("Erro ao carregar solicitações. Tente atualizar a página.");
       }
     } finally {
-      setLoading(false);
+      if (isInitial) setLoading(false);
     }
   }
 
   useEffect(() => {
-    fetchRequests();
+    fetchRequests(true);
 
     // Inscrição em tempo real para atualizações automáticas
     const channel = supabase
-      .channel('requests_db_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'requests' }, () => {
-        console.log("Realtime: Mudança detectada, atualizando lista...");
-        fetchRequests();
+      .channel('requests_realtime')
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'requests' 
+      }, (payload) => {
+        console.log("Realtime Change:", payload);
+        fetchRequests(false);
       })
-      .subscribe((status) => {
-        console.log("Realtime: Status da conexão:", status);
-      });
+      .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
@@ -135,7 +137,7 @@ export default function RequestList({ isAdmin }: RequestListProps) {
         </div>
         <div className="flex items-center gap-2">
           <button 
-            onClick={() => fetchRequests()}
+            onClick={() => fetchRequests(true)}
             className="px-4 py-2 border-2 border-[#141414] hover:bg-[#141414] hover:text-white transition-all text-[10px] font-black uppercase tracking-widest flex items-center gap-2 bg-white"
           >
             <Loader2 className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
