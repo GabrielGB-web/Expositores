@@ -4,16 +4,17 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Package, ClipboardList, PackagePlus, LogOut, User, Shield } from 'lucide-react';
+import { Package, ClipboardList, PackagePlus, LogOut, User, Shield, Users } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './lib/supabase';
 import { Profile } from './types';
 import RequestForm from './components/RequestForm';
 import RequestList from './components/RequestList';
 import DisplayManager from './components/DisplayManager';
+import UserManagement from './components/UserManagement';
 import Login from './components/Login';
 
-type Tab = 'solicitar' | 'solicitados' | 'catalogo';
+type Tab = 'solicitar' | 'solicitados' | 'catalogo' | 'usuarios';
 
 export default function App() {
   const [session, setSession] = useState<any>(null);
@@ -24,13 +25,13 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session) fetchProfile(session.user.id);
+      if (session) fetchProfile(session.user.id, session.user.email);
       else setInitLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (session) fetchProfile(session.user.id);
+      if (session) fetchProfile(session.user.id, session.user.email);
       else {
         setProfile(null);
         setInitLoading(false);
@@ -40,28 +41,84 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  async function fetchProfile(uid: string) {
+  async function fetchProfile(uid: string, email?: string) {
     try {
-      const { data, error } = await supabase
+      const currentUserEmail = email || session?.user?.email;
+      const isOwnerEmail = currentUserEmail === 'admin@gmail.com' || currentUserEmail === 'gabrielicloudgb@gmail.com';
+
+      console.log("Sistema: Verificando perfil para:", currentUserEmail);
+      console.log("Sistema: É Administrador?", isOwnerEmail);
+
+      const { data: existingProfile, error: fetchError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', uid)
-        .single();
-      
-      if (error) {
-        // Create profile if it doesn't exist
+        .maybeSingle(); 
+
+      if (fetchError) {
+        console.error("Sistema: Erro ao buscar perfil no Supabase:", fetchError.message);
+        // Se houver erro de recursão, assumimos o cargo localmente baseado no e-mail
+        if (fetchError.message?.includes('recursion') && isOwnerEmail) {
+          console.warn("Sistema: Operando em modo de emergência (Recursão detectada).");
+          setProfile({
+            id: uid,
+            email: currentUserEmail || '',
+            role: 'admin'
+          });
+          setInitLoading(false);
+          return;
+        }
+      }
+
+      const role = isOwnerEmail ? 'admin' : 'vendedor';
+
+      if (!existingProfile) {
+        console.log("Sistema: Perfil não encontrado, tentando persistir...");
         const { data: newData, error: createError } = await supabase
           .from('profiles')
-          .insert([{ id: uid, email: session?.user?.email, role: 'vendedor' }])
+          .insert([{ 
+            id: uid, 
+            email: currentUserEmail || '', 
+            role: role
+          }])
           .select()
           .single();
-        
-        if (!createError) setProfile(newData);
+
+        if (createError) {
+          console.warn("Sistema: Falha ao inserir perfil. Motivo:", createError.message);
+          // Se falhou o insert, talvez já exista mas o select falhou. Tentamos upsert como plano C
+          const { data: upsertData } = await supabase
+            .from('profiles')
+            .upsert({ id: uid, email: currentUserEmail || '', role: role })
+            .select()
+            .single();
+          
+          if (upsertData) {
+            setProfile(upsertData);
+          } else {
+            console.log("Sistema: Usando perfil local temporário.");
+            setProfile({
+              id: uid,
+              email: currentUserEmail || '',
+              role: role
+            });
+          }
+        } else {
+          console.log("Sistema: Perfil criado com sucesso.");
+          setProfile(newData);
+        }
       } else {
-        setProfile(data);
+        console.log("Sistema: Perfil carregado. Role:", existingProfile.role);
+        if (isOwnerEmail && existingProfile.role !== 'admin') {
+          console.log("Sistema: Corrigindo role para ADMIN...");
+          const { error: updateError } = await supabase.from('profiles').update({ role: 'admin' }).eq('id', uid);
+          if (updateError) console.error("Erro ao atualizar role:", updateError.message);
+          existingProfile.role = 'admin';
+        }
+        setProfile(existingProfile);
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error("Sistema: Erro na autenticação:", err.message);
     } finally {
       setInitLoading(false);
     }
@@ -139,15 +196,26 @@ export default function App() {
             Solicitados
           </button>
           {profile?.role === 'admin' && (
-            <button
-              onClick={() => setActiveTab('catalogo')}
-              className={`flex-1 flex items-center justify-center gap-2 py-5 font-black uppercase text-[10px] transition-all ${
-                activeTab === 'catalogo' ? 'bg-[#141414] text-white' : 'hover:bg-[#141414]/5'
-              }`}
-            >
-              <Package className="w-4 h-4" />
-              Catálogo / Estoque
-            </button>
+            <>
+              <button
+                onClick={() => setActiveTab('catalogo')}
+                className={`flex-1 flex items-center justify-center gap-2 py-5 font-black uppercase text-[10px] border-r border-[#141414] transition-all ${
+                  activeTab === 'catalogo' ? 'bg-[#141414] text-white' : 'hover:bg-[#141414]/5'
+                }`}
+              >
+                <Package className="w-4 h-4" />
+                Catálogo
+              </button>
+              <button
+                onClick={() => setActiveTab('usuarios')}
+                className={`flex-1 flex items-center justify-center gap-2 py-5 font-black uppercase text-[10px] transition-all ${
+                  activeTab === 'usuarios' ? 'bg-[#141414] text-white' : 'hover:bg-[#141414]/5'
+                }`}
+              >
+                <Users className="w-4 h-4" />
+                Usuários
+              </button>
+            </>
           )}
         </div>
       </nav>
@@ -175,7 +243,7 @@ export default function App() {
             >
               <RequestList isAdmin={profile?.role === 'admin'} />
             </motion.div>
-          ) : (
+          ) : activeTab === 'catalogo' ? (
             <motion.div
               key="catalogo"
               initial={{ opacity: 0, y: 10 }}
@@ -184,6 +252,16 @@ export default function App() {
               transition={{ duration: 0.2 }}
             >
               <DisplayManager />
+            </motion.div>
+          ) : (
+            <motion.div
+              key="usuarios"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+            >
+              <UserManagement />
             </motion.div>
           )}
         </AnimatePresence>

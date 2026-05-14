@@ -237,20 +237,6 @@ export default function DisplayManager() {
                   <AlertCircle className="text-red-500 w-5 h-5 shrink-0 mt-0.5" />
                   <p className="text-red-700 text-xs font-bold">{error}</p>
                 </div>
-                {(error.includes("row-level security") || error.includes("foreign key")) && (
-                  <p className="text-[10px] uppercase font-bold text-red-700 bg-white p-3 border border-red-200 text-left whitespace-pre-wrap font-mono leading-relaxed">
-                    Execute no SQL Editor do Supabase:\n\n
-                    -- Corrigir Remoção com Pedidos Ativos:\n
-                    ALTER TABLE requests DROP CONSTRAINT IF EXISTS requests_display_id_fkey;\n
-                    ALTER TABLE requests ADD CONSTRAINT requests_display_id_fkey \n
-                    FOREIGN KEY (display_id) REFERENCES displays(id) ON DELETE CASCADE;\n\n
-                    ALTER TABLE requests ADD COLUMN IF NOT EXISTS customer_name TEXT;\n\n
-                    -- Configurar Tabelas (se necessário):\n
-                    ALTER TABLE displays ADD COLUMN IF NOT EXISTS code TEXT;\n
-                    ALTER TABLE displays ENABLE ROW LEVEL SECURITY;\n
-                    CREATE POLICY "Public" ON displays FOR ALL USING (true) WITH CHECK (true);
-                  </p>
-                )}
               </div>
             )}
 

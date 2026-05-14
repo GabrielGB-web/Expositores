@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Camera, CheckCircle2, Clock, Tag, Hash, DollarSign, Image as ImageIcon, Loader2, Info, ChevronDown, ChevronUp } from 'lucide-react';
+import { Camera, CheckCircle2, Clock, Tag, Hash, DollarSign, Image as ImageIcon, Loader2, Info, ChevronDown, ChevronUp, User, ThumbsUp, ThumbsDown, Trash2, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../lib/supabase';
 import { DisplayRequest } from '../types';
@@ -14,6 +14,27 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
   const [showPhotoPreview, setShowPhotoPreview] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [processing, setProcessing] = useState(false);
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isAdmin) return;
+    if (!confirm("Excluir permanentemente este registro?")) return;
+
+    setProcessing(true);
+    try {
+      const { error } = await supabase
+        .from('requests')
+        .delete()
+        .eq('id', request.id);
+      if (error) throw error;
+      alert("Registro excluído.");
+    } catch (err: any) {
+      alert("Erro ao excluir: " + err.message);
+    } finally {
+      setProcessing(false);
+    }
+  };
 
   useEffect(() => {
     if (showSuccess) {
@@ -47,7 +68,6 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
         .update({
           status: 'delivered',
           photo_url: publicUrl,
-          delivered_at: new Date().toISOString(),
         })
         .eq('id', request.id);
 
@@ -61,13 +81,11 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
     }
   };
 
-  const formattedDate = new Date(request.created_at).toLocaleDateString('pt-BR', {
-    day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit'
-  });
-
-  const deliveredDate = request.delivered_at 
-    ? new Date(request.delivered_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
-    : null;
+  const formattedDate = request.created_at 
+    ? new Date(request.created_at).toLocaleDateString('pt-BR', {
+        day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit'
+      })
+    : 'DATA INDISPONÍVEL';
 
   return (
     <div className={`bg-white border-2 border-[#141414] overflow-hidden transition-all shadow-[6px_6px_0px_0px_rgba(20,20,20,1)] ${request.status === 'delivered' ? 'opacity-90' : ''}`}>
@@ -88,7 +106,11 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
         {/* Status Bar */}
         <div 
           onClick={() => setIsExpanded(!isExpanded)}
-          className={`w-full sm:w-20 flex sm:flex-col items-center justify-center p-3 text-white border-b sm:border-b-0 sm:border-r border-[#141414] transition-colors cursor-pointer group ${request.status === 'delivered' ? 'bg-green-600' : 'bg-[#141414]'}`}
+          className={`w-full sm:w-20 flex sm:flex-col items-center justify-center p-3 text-white border-b sm:border-b-0 sm:border-r border-[#141414] transition-colors cursor-pointer group ${
+            request.status === 'delivered' ? 'bg-green-600' : 
+            request.status === 'approved' ? 'bg-blue-600' : 
+            request.status === 'rejected' ? 'bg-red-600' : 'bg-[#141414]'
+          }`}
         >
           {isAdmin && request.user_email && (
              <div className="hidden sm:block absolute top-2 left-0 w-full text-center px-1">
@@ -97,11 +119,17 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
           )}
           {request.status === 'delivered' ? (
             <CheckCircle2 className="w-6 h-6" />
+          ) : request.status === 'approved' ? (
+            <ThumbsUp className="w-6 h-6" />
+          ) : request.status === 'rejected' ? (
+            <ThumbsDown className="w-6 h-6" />
           ) : (
             <Clock className="w-6 h-6 animate-pulse" />
           )}
           <span className="text-[9px] sm:vertical-rl sm:rotate-180 uppercase font-black tracking-[0.2em] ml-3 sm:ml-0 sm:mt-6 whitespace-nowrap">
-            {request.status === 'delivered' ? 'Concluído' : 'Aguardando'}
+            {request.status === 'delivered' ? 'Concluído' : 
+             request.status === 'approved' ? 'Aprovado' : 
+             request.status === 'rejected' ? 'Reprovado' : 'Aguardando'}
           </span>
           <div className="sm:mt-auto pt-2 hidden sm:block opacity-0 group-hover:opacity-100 transition-opacity">
             {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -125,8 +153,17 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
                   <div className="mt-1 font-mono text-[10px] font-black uppercase text-blue-600 tracking-wider">
                     {request.customer_name}
                   </div>
-                  <div className="flex items-center gap-1.5 text-[#141414]/40 font-mono text-[9px] uppercase mt-2 font-bold italic">
-                    SOLICITADO EM {formattedDate}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[#141414]/40 font-mono text-[9px] uppercase mt-2 font-bold">
+                    <span className="italic">SOLICITADO EM {formattedDate}</span>
+                    {isAdmin && request.user_email && (
+                      <>
+                        <span className="text-[#141414]/20">•</span>
+                        <span className="flex items-center gap-1 text-blue-600">
+                          <User className="w-3 h-3" />
+                          Vendedor: {request.user_email}
+                        </span>
+                      </>
+                    )}
                   </div>
                </div>
             </div>
@@ -153,33 +190,76 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
           </div>
 
           <div className="flex flex-col justify-end space-y-4" onClick={e => e.stopPropagation()}>
-            {request.status === 'pending' ? (
-              <div className="relative">
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                  onChange={handlePhotoUpload}
-                  disabled={uploading}
-                />
-                <button 
-                  disabled={uploading}
-                  className="w-full flex items-center justify-center gap-4 bg-[#E4E3E0] hover:bg-[#141414] hover:text-white border-4 border-[#141414] py-5 font-black uppercase text-xs transition-all tracking-[0.2em] shadow-[4px_4px_0px_0px_rgba(20,20,20,0.1)] hover:shadow-none hover:translate-x-1 hover:translate-y-1"
-                >
-                  {uploading ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : (
-                    <Camera className="w-5 h-5" />
-                  )}
-                  {uploading ? 'ENVIANDO...' : 'REGISTRAR CHEGADA'}
-                </button>
+            {isAdmin && (
+              <div className="flex items-center gap-1.5 mb-1">
+                <Shield className="w-3 h-3 text-red-600" />
+                <span className="text-[8px] font-black uppercase text-red-600 tracking-tighter">Acesso Administrativo Ativo</span>
+              </div>
+            )}
+            
+            {request.status !== 'delivered' && request.status !== 'rejected' ? (
+              <div className="space-y-2">
+                <div className="relative">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                    onChange={handlePhotoUpload}
+                    disabled={uploading}
+                  />
+                  <button 
+                    disabled={uploading}
+                    className="w-full flex items-center justify-center gap-4 bg-[#E4E3E0] hover:bg-[#141414] hover:text-white border-4 border-[#141414] py-5 font-black uppercase text-xs transition-all tracking-[0.2em] shadow-[4px_4px_0px_0px_rgba(20,20,20,0.1)] hover:shadow-none hover:translate-x-1 hover:translate-y-1"
+                  >
+                    {uploading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Camera className="w-5 h-5" />
+                    )}
+                    {uploading ? 'ENVIANDO...' : 'REGISTRAR ENTREGA'}
+                  </button>
+                </div>
+                {isAdmin && (
+                  <button 
+                    onClick={(e) => handleDelete(e)}
+                    disabled={processing}
+                    className="w-full py-2 text-[8px] font-black uppercase tracking-widest text-red-600 hover:underline flex items-center justify-center gap-2"
+                  >
+                    {processing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                    Excluir Registro
+                  </button>
+                )}
+              </div>
+            ) : request.status === 'rejected' ? (
+              <div className="space-y-2">
+                <div className="bg-red-50 border-2 border-red-200 p-4 flex items-center justify-center gap-3">
+                  <ThumbsDown className="w-5 h-5 text-red-500" />
+                  <span className="text-[10px] font-black uppercase text-red-700 tracking-widest">Solicitação Recusada</span>
+                </div>
+                {isAdmin && (
+                  <button 
+                    onClick={(e) => handleDelete(e)}
+                    disabled={processing}
+                    className="w-full py-2 text-[8px] font-black uppercase tracking-widest text-red-600 hover:underline flex items-center justify-center gap-2"
+                  >
+                    {processing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                    Excluir Definitivamente
+                  </button>
+                )}
               </div>
             ) : (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                    <span className="text-[10px] font-black uppercase text-[#141414]/40 tracking-widest">Comprovante Digital</span>
-                   <span className="text-[10px] font-mono font-bold bg-[#141414] text-white px-2 rounded-sm">{deliveredDate}</span>
+                   {isAdmin && (
+                    <button 
+                      onClick={(e) => handleDelete(e)}
+                      className="text-red-600 underline text-[8px] font-black uppercase"
+                    >
+                      Excluir
+                    </button>
+                   )}
                 </div>
                 <button 
                   onClick={() => setShowPhotoPreview(true)}
@@ -265,7 +345,7 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin }) => {
                 <span>Pedido: {request.order_number}</span>
                 <span>Cliente: {request.customer_code}</span>
                 <span className="text-[#141414]">{request.customer_name}</span>
-                <span className="ml-auto">Entrega: {deliveredDate}</span>
+                <span className="ml-auto">Solicitado: {formattedDate}</span>
               </div>
             </motion.div>
           </motion.div>

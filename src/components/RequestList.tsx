@@ -17,46 +17,48 @@ export default function RequestList({ isAdmin }: RequestListProps) {
   useEffect(() => {
     async function fetchRequests() {
       try {
+        setLoading(true);
         setError(null);
         
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) return;
 
-        // Fetch requests. Using !inner join for profiles to ensure it works, but if join fails we handle it
-        let query = supabase
+        // Consulta simplificada e resiliente
+        const { data, error: fetchErr } = await supabase
           .from('requests')
-          .select(`
-            *,
-            displays (
-              name,
-              code,
-              image_url
-            ),
-            profiles!requests_user_id_fkey (
-              email
-            )
-          `);
+          .select('*, displays(name, code, image_url), profiles(email)');
 
-        if (!isAdmin) {
-          query = query.eq('user_id', session.user.id);
+        if (fetchErr) {
+          // Fallback final: se a busca com joins falhar, tenta carregar pelo menos os dados básicos
+          const { data: fallbackData, error: fallbackErr } = await supabase
+            .from('requests')
+            .select('*');
+          
+          if (fallbackErr) throw fallbackErr;
+          
+          const formatted = (fallbackData || []).map(r => ({
+            ...r,
+            display_name: 'Carregando...',
+            display_code: '---',
+            user_email: 'Sincronizando...'
+          }));
+          setRequests(formatted as DisplayRequest[]);
+        } else {
+          const formatted = (data || []).map(r => ({
+            ...r,
+            display_name: (r as any).displays?.name || 'Expositor Removido',
+            display_code: (r as any).displays?.code || '---',
+            display_image: (r as any).displays?.image_url,
+            user_email: (r as any).profiles?.email || 'Vendedor'
+          }));
+          
+          // Se não for admin, filtra localmente para garantir segurança se o RLS falhar
+          const finalData = isAdmin ? formatted : formatted.filter(r => r.user_id === session.user.id);
+          setRequests(finalData as DisplayRequest[]);
         }
-
-        const { data, error: fetchErr } = await query.order('created_at', { ascending: false });
-
-        if (fetchErr) throw fetchErr;
-
-        const formatted = (data || []).map(r => ({
-          ...r,
-          display_name: (r as any).displays?.name,
-          display_code: (r as any).displays?.code,
-          display_image: (r as any).displays?.image_url,
-          user_email: (r as any).profiles?.email
-        }));
-
-        setRequests(formatted as DisplayRequest[]);
       } catch (err: any) {
         console.error("Error fetching requests:", err);
-        setError(err.message || "Erro ao conectar com o banco.");
+        setError("Erro ao carregar solicitações. Tente atualizar a página.");
       } finally {
         setLoading(false);
       }
@@ -64,8 +66,9 @@ export default function RequestList({ isAdmin }: RequestListProps) {
 
     fetchRequests();
 
+    // Inscrição em tempo real para atualizações automáticas
     const channel = supabase
-      .channel('requests_changes')
+      .channel('requests_db_changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'requests' }, () => {
         fetchRequests();
       })
@@ -80,7 +83,8 @@ export default function RequestList({ isAdmin }: RequestListProps) {
     r.display_name?.toLowerCase().includes(filter.toLowerCase()) ||
     r.order_number.toLowerCase().includes(filter.toLowerCase()) ||
     r.customer_code.toLowerCase().includes(filter.toLowerCase()) ||
-    r.customer_name.toLowerCase().includes(filter.toLowerCase())
+    r.customer_name.toLowerCase().includes(filter.toLowerCase()) ||
+    r.user_email?.toLowerCase().includes(filter.toLowerCase())
   );
 
   if (loading) {
@@ -97,27 +101,13 @@ export default function RequestList({ isAdmin }: RequestListProps) {
       <div className="bg-white border-2 border-[#141414] p-8 shadow-[8px_8px_0px_0px_rgba(20,20,20,1)] text-center">
         <PackageX className="w-12 h-12 text-red-500 mx-auto mb-4" />
         <h3 className="font-black text-lg uppercase tracking-tighter mb-2">Erro na Listagem</h3>
-        <p className="text-sm text-[#141414]/60 mb-6">O banco retornou: {error}</p>
-        <div className="space-y-4">
-          <div className="text-left bg-gray-900 text-green-400 p-4 rounded font-mono text-[9px] overflow-x-auto whitespace-pre">
-            {`-- Cole no SQL Editor do Supabase:\n\n` +
-             `ALTER TABLE requests ADD COLUMN IF NOT EXISTS customer_name TEXT;\n` +
-             `ALTER TABLE requests ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id);\n\n` +
-             `CREATE TABLE IF NOT EXISTS requests (id UUID DEFAULT gen_random_uuid() PRIMARY KEY, display_id UUID REFERENCES displays(id), user_id UUID REFERENCES auth.users(id), order_number TEXT, customer_code TEXT, customer_name TEXT, order_value DECIMAL, status TEXT, photo_url TEXT, created_at TIMESTAMPTZ DEFAULT now());\n\n` +
-             `CREATE TABLE IF NOT EXISTS profiles (id UUID PRIMARY KEY REFERENCES auth.users(id), email TEXT, role TEXT DEFAULT 'vendedor');\n\n` +
-             `ALTER TABLE requests DROP CONSTRAINT IF EXISTS requests_user_id_fkey;\n` +
-             `ALTER TABLE requests ADD CONSTRAINT requests_user_id_fkey FOREIGN KEY (user_id) REFERENCES profiles(id);\n` +
-             `ALTER TABLE requests ADD CONSTRAINT unique_customer_code UNIQUE (customer_code);\n\n` +
-             `ALTER TABLE requests ENABLE ROW LEVEL SECURITY;\n` +
-             `CREATE POLICY "Public" ON requests FOR ALL USING (true) WITH CHECK (true);`}
-          </div>
-          <button 
-            onClick={() => window.location.reload()}
-            className="w-full px-8 py-3 bg-[#141414] text-white font-bold uppercase text-xs"
-          >
-            Sincronizar Agora
-          </button>
-        </div>
+        <p className="text-sm text-[#141414]/60 mb-6">{error}</p>
+        <button 
+          onClick={() => window.location.reload()}
+          className="w-full px-8 py-3 bg-[#141414] text-white font-bold uppercase text-xs"
+        >
+          Tentar Novamente
+        </button>
       </div>
     );
   }

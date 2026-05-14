@@ -1,4 +1,4 @@
-export type RequestStatus = 'pending' | 'delivered';
+export type RequestStatus = 'pending' | 'approved' | 'delivered' | 'rejected';
 export type UserRole = 'admin' | 'vendedor';
 
 export interface Profile {

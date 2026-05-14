@@ -122,25 +122,14 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
     return (
       <div className="bg-white border-2 border-[#141414] p-8 shadow-[8px_8px_0px_0px_rgba(20,20,20,1)] text-center">
         <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-        <h3 className="font-black text-lg uppercase tracking-tighter mb-2">Configuração do Banco Pendente</h3>
-        <p className="text-sm text-[#141414]/60 mb-6">As tabelas ou permissões não foram encontradas no Supabase.</p>
-        <div className="space-y-4">
-          <div className="text-left bg-gray-900 text-green-400 p-4 rounded font-mono text-[9px] overflow-x-auto whitespace-pre">
-            {`-- Cole no SQL Editor do Supabase:\n\n` +
-             `ALTER TABLE requests ADD COLUMN IF NOT EXISTS customer_name TEXT;\n` +
-             `ALTER TABLE requests ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id);\n\n` +
-             `CREATE TABLE IF NOT EXISTS requests (id UUID DEFAULT gen_random_uuid() PRIMARY KEY, display_id UUID REFERENCES displays(id), user_id UUID REFERENCES auth.users(id), order_number TEXT, customer_code TEXT, customer_name TEXT, order_value DECIMAL, status TEXT, photo_url TEXT, created_at TIMESTAMPTZ DEFAULT now());\n` +
-             `ALTER TABLE requests ADD CONSTRAINT unique_customer_code UNIQUE (customer_code);\n` +
-             `ALTER TABLE displays ENABLE ROW LEVEL SECURITY;\n` +
-             `CREATE POLICY "Public" ON displays FOR ALL USING (true) WITH CHECK (true);`}
-          </div>
-          <button 
-            onClick={() => window.location.reload()}
-            className="w-full px-8 py-3 bg-[#141414] text-white font-bold uppercase text-xs"
-          >
-            Sincronizar Agora
-          </button>
-        </div>
+        <h3 className="font-black text-lg uppercase tracking-tighter mb-2">Erro ao conectar</h3>
+        <p className="text-sm text-[#141414]/60 mb-6">{error}</p>
+        <button 
+          onClick={() => window.location.reload()}
+          className="w-full px-8 py-3 bg-[#141414] text-white font-bold uppercase text-xs"
+        >
+          Tentar Novamente
+        </button>
       </div>
     );
   }
