@@ -13,6 +13,7 @@ export interface Display {
   code?: string;
   image_url: string;
   stock: number;
+  department: string;
 }
 
 export interface DisplayRequest {
@@ -32,4 +33,13 @@ export interface DisplayRequest {
   delivered_at?: string;
   user_id: string;
   user_email?: string;
+  department?: string;
 }
+
+export const DEPARTMENTS = [
+  'ELMA CHIPS',
+  'MONDELEZ',
+  'FELTRIN',
+  'CALÇADOS',
+  'AB MAURY'
+];

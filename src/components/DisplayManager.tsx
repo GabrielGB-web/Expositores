@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { Package, Plus, Trash2, Camera, Loader2, AlertCircle } from 'lucide-react';
-import { Display } from '../types';
+import { Display, DEPARTMENTS } from '../types';
 
 export default function DisplayManager() {
   const [displays, setDisplays] = useState<Display[]>([]);
@@ -14,6 +14,7 @@ export default function DisplayManager() {
     name: '',
     code: '',
     stock: 0,
+    department: DEPARTMENTS[0],
     image: null as File | null,
     imageUrlPreview: ''
   });
@@ -56,6 +57,7 @@ export default function DisplayManager() {
       name: display.name,
       code: display.code || '',
       stock: display.stock,
+      department: display.department || DEPARTMENTS[0],
       image: null,
       imageUrlPreview: display.image_url
     });
@@ -64,7 +66,7 @@ export default function DisplayManager() {
 
   const handleCancelEdit = () => {
     setEditId(null);
-    setFormData({ name: '', code: '', stock: 0, image: null, imageUrlPreview: '' });
+    setFormData({ name: '', code: '', stock: 0, department: DEPARTMENTS[0], image: null, imageUrlPreview: '' });
   };
 
   const handleSaveDisplay = async (e: React.FormEvent) => {
@@ -103,6 +105,7 @@ export default function DisplayManager() {
         name: formData.name,
         code: formData.code,
         stock: formData.stock,
+        department: formData.department,
         image_url: publicUrl
       };
 
@@ -218,6 +221,18 @@ export default function DisplayManager() {
                 />
               </div>
               <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-[#141414]/40">Departamento</label>
+                <select 
+                  value={formData.department}
+                  onChange={e => setFormData(p => ({ ...p, department: e.target.value }))}
+                  className="w-full border-2 border-[#141414] p-3 font-bold uppercase text-sm focus:bg-[#141414]/5 outline-none bg-white"
+                >
+                  {DEPARTMENTS.map(dept => (
+                    <option key={dept} value={dept}>{dept}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1">
                 <label className="text-[10px] font-black uppercase tracking-widest text-[#141414]/40">Quantidade em Estoque</label>
                 <input 
                   type="number" 
@@ -288,6 +303,7 @@ export default function DisplayManager() {
                       <span className="text-[8px] font-mono font-black bg-[#141414] text-white px-1 py-0.5">{display.code}</span>
                     )}
                   </div>
+                  <p className="font-mono text-[8px] font-black text-[#141414]/40 uppercase tracking-tighter mt-0.5">{display.department}</p>
                   <p className="font-mono text-[10px] font-bold text-green-700 bg-green-50 inline-block px-1 mt-1">ESTOQUE: {display.stock}</p>
                 </div>
                 <div className="flex items-center gap-1">

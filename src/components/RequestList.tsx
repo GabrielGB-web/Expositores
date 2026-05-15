@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Search, Filter, Loader2, PackageX } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { DisplayRequest } from '../types';
+import { DisplayRequest, DEPARTMENTS } from '../types';
 import RequestCard from './RequestCard';
 
 interface RequestListProps {
@@ -13,6 +13,7 @@ export default function RequestList({ isAdmin }: RequestListProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>('');
+  const [deptFilter, setDeptFilter] = useState<string>('TODOS');
 
   async function fetchRequests(isInitial = false) {
     try {
@@ -88,13 +89,18 @@ export default function RequestList({ isAdmin }: RequestListProps) {
     };
   }, [isAdmin]);
 
-  const filteredRequests = requests.filter(r => 
-    r.display_name?.toLowerCase().includes(filter.toLowerCase()) ||
-    r.order_number.toLowerCase().includes(filter.toLowerCase()) ||
-    r.customer_code.toLowerCase().includes(filter.toLowerCase()) ||
-    r.customer_name.toLowerCase().includes(filter.toLowerCase()) ||
-    r.user_email?.toLowerCase().includes(filter.toLowerCase())
-  );
+  const filteredRequests = requests.filter(r => {
+    const matchesSearch = 
+      r.display_name?.toLowerCase().includes(filter.toLowerCase()) ||
+      r.order_number.toLowerCase().includes(filter.toLowerCase()) ||
+      r.customer_code.toLowerCase().includes(filter.toLowerCase()) ||
+      r.customer_name.toLowerCase().includes(filter.toLowerCase()) ||
+      r.user_email?.toLowerCase().includes(filter.toLowerCase());
+    
+    const matchesDept = deptFilter === 'TODOS' || r.department === deptFilter;
+    
+    return matchesSearch && matchesDept;
+  });
 
   if (loading) {
     return (
@@ -135,7 +141,20 @@ export default function RequestList({ isAdmin }: RequestListProps) {
             className="w-full pl-10 pr-4 py-3 border-2 border-[#141414]/10 focus:border-[#141414] outline-none font-mono font-bold text-sm transition-all"
           />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex items-center gap-2 bg-[#141414]/5 px-3 py-2 border-2 border-[#141414] flex-1 sm:flex-none">
+            <Filter className="w-4 h-4" />
+            <select 
+              value={deptFilter}
+              onChange={(e) => setDeptFilter(e.target.value)}
+              className="bg-transparent font-black uppercase text-[10px] outline-none cursor-pointer w-full"
+            >
+              <option value="TODOS">TODOS DEPTS</option>
+              {DEPARTMENTS.map(dept => (
+                <option key={dept} value={dept}>{dept}</option>
+              ))}
+            </select>
+          </div>
           <button 
             onClick={() => fetchRequests(true)}
             className="px-4 py-2 border-2 border-[#141414] hover:bg-[#141414] hover:text-white transition-all text-[10px] font-black uppercase tracking-widest flex items-center gap-2 bg-white"

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Send, AlertCircle, Loader2, Check, Package, Info } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { Display } from '../types';
+import { Display, DEPARTMENTS } from '../types';
+import { Filter } from 'lucide-react';
 
 interface RequestFormProps {
   onSuccess: () => void;
@@ -14,6 +15,7 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
   const [error, setError] = useState<string | null>(null);
   
   const [selectedDisplay, setSelectedDisplay] = useState<Display | null>(null);
+  const [selectedDepartment, setSelectedDepartment] = useState<string>(DEPARTMENTS[0]);
   const [formData, setFormData] = useState({
     orderNumber: '',
     customerCode: '',
@@ -88,6 +90,7 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
           customer_name: formData.customerName,
           order_value: parseFloat(formData.orderValue),
           quantity: quantityNum,
+          department: selectedDisplay.department,
           status: 'pending',
           user_id: session.user.id
         }]);
@@ -112,6 +115,8 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
   };
+
+  const filteredDisplays = displays.filter(d => d.department === selectedDepartment);
 
   if (fetching) {
     return (
@@ -147,13 +152,30 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
             <Package className="w-6 h-6" />
             Catálogo de Expositores
           </h2>
-          <div className="bg-[#141414] text-white text-[10px] font-bold px-3 py-1 uppercase tracking-widest">
-            {displays.length} Modelos
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 bg-[#141414]/5 px-3 py-2 border-2 border-[#141414]">
+                <Filter className="w-4 h-4" />
+                <select 
+                  value={selectedDepartment}
+                  onChange={(e) => {
+                    setSelectedDepartment(e.target.value);
+                    setSelectedDisplay(null);
+                  }}
+                  className="bg-transparent font-black uppercase text-[10px] outline-none cursor-pointer"
+                >
+                  {DEPARTMENTS.map(dept => (
+                    <option key={dept} value={dept}>{dept}</option>
+                  ))}
+                </select>
+            </div>
+            <div className="bg-[#141414] text-white text-[10px] font-bold px-3 py-1 uppercase tracking-widest hidden sm:block">
+              {filteredDisplays.length} Disponíveis
+            </div>
           </div>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-          {displays.map((display) => (
+          {filteredDisplays.map((display) => (
             <button
               key={display.id}
               onClick={() => setSelectedDisplay(display)}

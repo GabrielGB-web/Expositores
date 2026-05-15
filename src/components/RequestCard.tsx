@@ -171,7 +171,15 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin, onStatusCha
                )}
                <div>
                   <h3 className="font-black text-lg uppercase leading-none tracking-tighter">{request.display_name}</h3>
-                  <div className="mt-1 font-mono text-[10px] font-black uppercase text-blue-600 tracking-wider">
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="font-mono text-[9px] font-black bg-[#141414] text-white px-1.5 py-0.5 uppercase">
+                      {request.display_code || '---'}
+                    </span>
+                    <span className="font-mono text-[8px] font-black text-[#141414]/40 uppercase tracking-widest">
+                      {request.department || 'DEPARTAMENTO N/A'}
+                    </span>
+                  </div>
+                  <div className="mt-2 font-mono text-[10px] font-black uppercase text-blue-600 tracking-wider">
                     {request.customer_name}
                   </div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[#141414]/40 font-mono text-[9px] uppercase mt-2 font-bold">
