@@ -86,7 +86,8 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
         .insert([{
           display_id: selectedDisplay.id,
           display_name: selectedDisplay.name,
-          display_code: selectedDisplay.code,
+          display_code: selectedDisplay.code || '---',
+          display_image: selectedDisplay.image_url,
           order_number: formData.orderNumber,
           customer_code: formData.customerCode,
           customer_name: formData.customerName,

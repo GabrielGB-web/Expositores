@@ -465,6 +465,66 @@ ALTER TABLE requests ENABLE ROW LEVEL SECURITY;`}
         </div>
       </div>
 
+      <div className="bg-white border-4 border-red-600 p-6 space-y-4 shadow-[10px_10px_0px_0px_rgba(220,38,38,0.2)]">
+        <div className="flex items-center gap-3 border-b-2 border-red-600 pb-4">
+          <div className="bg-red-600 p-2">
+            <Shield className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h4 className="text-sm font-black uppercase tracking-tighter text-red-600">Banco de Dados: Comandos de Reparo</h4>
+            <p className="text-[10px] font-bold uppercase text-red-600/60">Sincronização obrigatória de estrutura</p>
+          </div>
+        </div>
+        
+        <p className="text-xs font-bold text-red-800 italic">
+          ⚠️ Se você receber erro de "schema cache" ou "column does not exist", copie o código abaixo e execute no SQL EDITOR do seu painel Supabase:
+        </p>
+
+        <div className="bg-[#141414] p-4 font-mono text-[10px] text-green-400 overflow-x-auto border-2 border-red-600">
+          <pre className="whitespace-pre-wrap select-all">
+{`-- 1. ADICIONAR COLUNAS FALTANTES
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1;
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS department TEXT;
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS display_code TEXT;
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS display_name TEXT;
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS display_image TEXT;
+ALTER TABLE displays ADD COLUMN IF NOT EXISTS department TEXT DEFAULT 'ELMA CHIPS';
+
+-- 2. ATUALIZAR DADOS EXISTENTES
+UPDATE displays SET department = 'ELMA CHIPS' WHERE department IS NULL;
+
+-- 3. CORREÇÃO DE POLÍTICAS (INCLUINDO DANIEL@FRANCAL.COM)
+-- Execute este bloco para garantir que todos os admins tenham acesso
+DO $$ 
+DECLARE 
+    pol RECORD;
+BEGIN 
+    FOR pol IN (SELECT policyname, tablename FROM pg_policies WHERE tablename IN ('profiles', 'requests')) 
+    LOOP EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(pol.policyname) || ' ON ' || quote_ident(pol.tablename); END LOOP;
+END $$;
+
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE requests ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "adm_master_profiles_v5" ON profiles FOR ALL 
+USING (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'));
+
+CREATE POLICY "adm_master_requests_v5" ON requests FOR ALL 
+USING (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'));
+
+CREATE POLICY "vendedor_view_profile" ON profiles FOR SELECT USING (auth.uid() = id);
+CREATE POLICY "vendedor_manage_requests" ON requests FOR ALL USING (auth.uid() = user_id);`}
+          </pre>
+        </div>
+        
+        <div className="flex items-center gap-3 bg-red-50 p-3 border border-red-200">
+          <Info className="w-4 h-4 text-red-600 shrink-0" />
+          <p className="text-[10px] font-medium text-red-800 leading-normal">
+            Após rodar no Supabase, atualize esta página. Isso resolverá o erro de "Could not find the column".
+          </p>
+        </div>
+      </div>
+
       <div className="bg-white border-2 border-dashed border-[#141414]/20 p-6 space-y-4">
         <div>
           <h4 className="text-[10px] font-black uppercase tracking-widest mb-2 flex items-center gap-2">
