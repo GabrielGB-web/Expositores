@@ -324,7 +324,8 @@ BEGIN
     LOOP EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(pol.policyname) || ' ON ' || quote_ident(pol.tablename); END LOOP;
 END $$;
 
--- 3. Correção do Erro de Constraint (Permite Status 'approved')
+-- 3. Correção do Erro de Constraint e Novas Colunas
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1;
 ALTER TABLE requests DROP CONSTRAINT IF EXISTS requests_status_check;
 ALTER TABLE requests ADD CONSTRAINT requests_status_check 
 CHECK (status IN ('pending', 'approved', 'delivered', 'rejected'));

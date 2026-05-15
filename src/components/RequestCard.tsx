@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Camera, CheckCircle2, Clock, Tag, Hash, DollarSign, Image as ImageIcon, Loader2, Info, ChevronDown, ChevronUp, User, ThumbsUp, ThumbsDown, Trash2, Shield } from 'lucide-react';
+import { Camera, CheckCircle2, Clock, Tag, Hash, DollarSign, Image as ImageIcon, Loader2, Info, ChevronDown, ChevronUp, User, ThumbsUp, ThumbsDown, Trash2, Shield, Package } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../lib/supabase';
 import { DisplayRequest } from '../types';
@@ -204,9 +204,15 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin, onStatusCha
               </div>
             </div>
 
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#141414]/5 font-mono text-xs font-black border border-[#141414]/10 rounded-sm">
-                <DollarSign className="w-3 h-3 text-[#141414]" />
-                R$ {request.order_value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#141414]/5 font-mono text-xs font-black border border-[#141414]/10 rounded-sm">
+                  <DollarSign className="w-3 h-3 text-[#141414]" />
+                  R$ {request.order_value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </div>
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#141414] text-white font-mono text-xs font-black border border-[#141414] rounded-sm">
+                  <Package className="w-3 h-3" />
+                  {request.quantity} UN
+              </div>
             </div>
           </div>
 

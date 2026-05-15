@@ -19,6 +19,7 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
     customerCode: '',
     customerName: '',
     orderValue: '',
+    quantity: '1',
   });
 
   useEffect(() => {
@@ -60,7 +61,9 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
         .single();
 
       if (stockCheckErr || !display) throw new Error("Erro ao verificar estoque.");
-      if (display.stock <= 0) throw new Error("Este expositor esgotou recentemente.");
+      const quantityNum = parseInt(formData.quantity);
+      if (isNaN(quantityNum) || quantityNum <= 0) throw new Error("Quantidade inválida.");
+      if (display.stock < quantityNum) throw new Error(`Estoque insuficiente. Disponível: ${display.stock}`);
 
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Sessão expirada. Faça login novamente.");
@@ -84,6 +87,7 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
           customer_code: formData.customerCode,
           customer_name: formData.customerName,
           order_value: parseFloat(formData.orderValue),
+          quantity: quantityNum,
           status: 'pending',
           user_id: session.user.id
         }]);
@@ -93,8 +97,9 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
       // 4. Update stock (Manual decrement)
       await supabase
         .from('displays')
-        .update({ stock: display.stock - 1 })
-        .eq('id', selectedDisplay.id);
+        .update({ stock: display.stock - quantityNum })
+        .eq(
+'id', selectedDisplay.id);
 
       onSuccess();
     } catch (err: any) {
@@ -249,6 +254,21 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
                 value={formData.orderValue}
                 onChange={handleChange}
                 placeholder="0.00"
+                className="w-full border-2 border-[#141414] p-3 font-mono font-bold focus:bg-[#141414]/5 outline-none transition-colors"
+                disabled={loading}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-black uppercase tracking-widest text-[#141414]/40">Quantidade</label>
+              <input
+                name="quantity"
+                required
+                type="number"
+                min="1"
+                max={selectedDisplay?.stock || 1}
+                value={formData.quantity}
+                onChange={handleChange}
                 className="w-full border-2 border-[#141414] p-3 font-mono font-bold focus:bg-[#141414]/5 outline-none transition-colors"
                 disabled={loading}
               />
