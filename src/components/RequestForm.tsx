@@ -85,6 +85,8 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
         .from('requests')
         .insert([{
           display_id: selectedDisplay.id,
+          display_name: selectedDisplay.name,
+          display_code: selectedDisplay.code,
           order_number: formData.orderNumber,
           customer_code: formData.customerCode,
           customer_name: formData.customerName,

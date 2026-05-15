@@ -26,7 +26,7 @@ export default function RequestList({ isAdmin }: RequestListProps) {
       // Consulta simplificada e resiliente
       const { data, error: fetchErr } = await supabase
         .from('requests')
-        .select('*, displays(name, code, image_url), profiles(email)')
+        .select('*, displays(name, code, image_url, department), profiles(email)')
         .order('created_at', { ascending: false });
 
       if (fetchErr) {
@@ -35,9 +35,10 @@ export default function RequestList({ isAdmin }: RequestListProps) {
       
       const formatted = (data || []).map(r => ({
         ...r,
-        display_name: (r as any).displays?.name || 'Expositor Removido',
-        display_code: (r as any).displays?.code || '---',
-        display_image: (r as any).displays?.image_url,
+        display_name: r.display_name || (r as any).displays?.name || 'Expositor Removido',
+        display_code: r.display_code || (r as any).displays?.code || '---',
+        display_image: r.display_image || (r as any).displays?.image_url,
+        department: r.department || (r as any).displays?.department || 'ELMA CHIPS',
         user_email: (r as any).profiles?.email || 'Vendedor'
       }));
       
