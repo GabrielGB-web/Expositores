@@ -98,8 +98,7 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
       await supabase
         .from('displays')
         .update({ stock: display.stock - quantityNum })
-        .eq(
-'id', selectedDisplay.id);
+        .eq('id', selectedDisplay.id);
 
       onSuccess();
     } catch (err: any) {

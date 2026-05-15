@@ -44,7 +44,7 @@ export default function App() {
   async function fetchProfile(uid: string, email?: string) {
     try {
       const currentUserEmail = email || session?.user?.email;
-      const isOwnerEmail = currentUserEmail === 'admin@gmail.com' || currentUserEmail === 'gabrielicloudgb@gmail.com';
+      const isOwnerEmail = currentUserEmail === 'admin@gmail.com' || currentUserEmail === 'gabrielicloudgb@gmail.com' || currentUserEmail === 'daniel@francal.com';
 
       console.log("Sistema: Verificando perfil para:", currentUserEmail);
       console.log("Sistema: É Administrador?", isOwnerEmail);

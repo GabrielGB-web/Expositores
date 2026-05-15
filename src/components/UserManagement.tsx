@@ -332,12 +332,12 @@ CHECK (status IN ('pending', 'approved', 'delivered', 'rejected'));
 
 -- 4. Recriação das regras administrativas (SEM RECURSÃO)
 -- ADM PROFILE: ACESSO TOTAL
-CREATE POLICY "adm_master_profiles_v4" ON profiles FOR ALL 
-USING (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com'));
+CREATE POLICY "adm_master_profiles_v5" ON profiles FOR ALL 
+USING (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'));
 
 -- ADM REQUESTS: ACESSO TOTAL
-CREATE POLICY "adm_master_requests_v4" ON requests FOR ALL 
-USING (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com'));
+CREATE POLICY "adm_master_requests_v5" ON requests FOR ALL 
+USING (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'));
 
 -- VENDEDORES: ACESSO RESTRITO
 CREATE POLICY "vendedor_view_profile" ON profiles FOR SELECT USING (auth.uid() = id);
@@ -369,7 +369,7 @@ ALTER TABLE requests ENABLE ROW LEVEL SECURITY;`}
                 onClick={async () => {
                   const { data: { user } } = await supabase.auth.getUser();
                   if (!user) return;
-                  const isOwnerEmail = user.email === 'admin@gmail.com' || user.email === 'gabrielicloudgb@gmail.com';
+                  const isOwnerEmail = user.email === 'admin@gmail.com' || user.email === 'gabrielicloudgb@gmail.com' || user.email === 'daniel@francal.com';
                   try {
                     const { error } = await supabase.from('profiles').upsert({
                       id: user.id,
