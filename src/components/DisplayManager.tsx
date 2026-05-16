@@ -15,6 +15,7 @@ export default function DisplayManager() {
     code: '',
     stock: 0,
     department: DEPARTMENTS[0],
+    min_order_value: 0,
     image: null as File | null,
     imageUrlPreview: ''
   });
@@ -58,6 +59,7 @@ export default function DisplayManager() {
       code: display.code || '',
       stock: display.stock,
       department: display.department || DEPARTMENTS[0],
+      min_order_value: display.min_order_value || 0,
       image: null,
       imageUrlPreview: display.image_url
     });
@@ -66,7 +68,7 @@ export default function DisplayManager() {
 
   const handleCancelEdit = () => {
     setEditId(null);
-    setFormData({ name: '', code: '', stock: 0, department: DEPARTMENTS[0], image: null, imageUrlPreview: '' });
+    setFormData({ name: '', code: '', stock: 0, department: DEPARTMENTS[0], min_order_value: 0, image: null, imageUrlPreview: '' });
   };
 
   const handleSaveDisplay = async (e: React.FormEvent) => {
@@ -106,6 +108,7 @@ export default function DisplayManager() {
         code: formData.code,
         stock: formData.stock,
         department: formData.department,
+        min_order_value: formData.min_order_value,
         image_url: publicUrl
       };
 
@@ -233,14 +236,27 @@ export default function DisplayManager() {
                 </select>
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-black uppercase tracking-widest text-[#141414]/40">Quantidade em Estoque</label>
+                <label className="text-[10px] font-black uppercase tracking-widest text-[#141414]/40">Estoque</label>
                 <input 
                   type="number" 
                   min="0"
                   required
                   placeholder="0"
                   value={formData.stock}
-                  onChange={e => setFormData(p => ({ ...p, stock: parseInt(e.target.value) }))}
+                  onChange={e => setFormData(p => ({ ...p, stock: parseInt(e.target.value) || 0 }))}
+                  className="w-full border-2 border-[#141414] p-3 font-mono font-bold focus:bg-[#141414]/5 outline-none"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-[#141414]/40">Valor Mín. Pedido (R$)</label>
+                <input 
+                  type="number" 
+                  min="0"
+                  step="0.01"
+                  required
+                  placeholder="0.00"
+                  value={formData.min_order_value}
+                  onChange={e => setFormData(p => ({ ...p, min_order_value: parseFloat(e.target.value) || 0 }))}
                   className="w-full border-2 border-[#141414] p-3 font-mono font-bold focus:bg-[#141414]/5 outline-none"
                 />
               </div>
@@ -304,7 +320,10 @@ export default function DisplayManager() {
                     )}
                   </div>
                   <p className="font-mono text-[8px] font-black text-[#141414]/40 uppercase tracking-tighter mt-0.5">{display.department}</p>
-                  <p className="font-mono text-[10px] font-bold text-green-700 bg-green-50 inline-block px-1 mt-1">ESTOQUE: {display.stock}</p>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    <p className="font-mono text-[9px] font-bold text-green-700 bg-green-50 inline-block px-1">ESTOQUE: {display.stock}</p>
+                    <p className="font-mono text-[9px] font-bold text-blue-700 bg-blue-50 inline-block px-1">MINIMO: R$ {display.min_order_value?.toLocaleString('pt-br', { minimumFractionDigits: 2 })}</p>
+                  </div>
                 </div>
                 <div className="flex items-center gap-1">
                   <button 

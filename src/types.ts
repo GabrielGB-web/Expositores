@@ -14,6 +14,7 @@ export interface Display {
   image_url: string;
   stock: number;
   department: string;
+  min_order_value?: number;
 }
 
 export interface DisplayRequest {

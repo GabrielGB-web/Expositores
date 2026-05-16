@@ -67,6 +67,11 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
       if (isNaN(quantityNum) || quantityNum <= 0) throw new Error("Quantidade inválida.");
       if (display.stock < quantityNum) throw new Error(`Estoque insuficiente. Disponível: ${display.stock}`);
 
+      const orderValueNum = parseFloat(formData.orderValue);
+      if (selectedDisplay.min_order_value && orderValueNum < selectedDisplay.min_order_value) {
+        throw new Error(`O valor do pedido (R$ ${orderValueNum.toLocaleString('pt-br', { minimumFractionDigits: 2 })}) é inferior ao valor mínimo exigido para este expositor (R$ ${selectedDisplay.min_order_value.toLocaleString('pt-br', { minimumFractionDigits: 2 })}).`);
+      }
+
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Sessão expirada. Faça login novamente.");
 
@@ -197,12 +202,17 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
               </div>
               <p className="text-xs font-black uppercase leading-none mb-1 truncate">{display.name}</p>
               <p className="text-[9px] font-mono font-black text-[#141414]/40 mt-1 mb-2">COD: {display.code || '---'}</p>
-              <div className="flex items-center justify-between mt-auto">
+              <div className="flex flex-wrap items-center justify-between gap-1 mt-auto">
                 <span className={`text-[9px] font-mono font-black border px-1 ${
                    display.stock > 0 ? 'bg-green-100 text-green-800 border-green-200' : 'bg-red-100 text-red-800 border-red-200'
                 }`}>
                   QTD: {display.stock}
                 </span>
+                {display.min_order_value > 0 && (
+                  <span className="text-[9px] font-mono font-black border bg-blue-100 text-blue-800 border-blue-200 px-1">
+                    MIN: R${display.min_order_value}
+                  </span>
+                )}
                 {selectedDisplay?.id === display.id && <Check className="w-4 h-4 text-[#141414]" />}
               </div>
             </button>
