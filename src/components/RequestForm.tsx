@@ -114,7 +114,12 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
       onSuccess();
     } catch (err: any) {
       console.error("Insert error:", err);
-      setError('Falha ao enviar solicitação: ' + (err.message || 'Erro desconhecido'));
+      const msg = err.message || "";
+      if (msg.includes("min_order_value") || msg.includes("column")) {
+        setError("ERRO DE ESTRUTURA: Colunas novas não encontradas. Vá na aba 'USUÁRIOS' e siga as instruções de 'COMANDOS DE REPARO' no seu painel Supabase.");
+      } else {
+        setError('Falha ao enviar solicitação: ' + (err.message || 'Erro desconhecido'));
+      }
     } finally {
       setLoading(false);
     }

@@ -136,7 +136,11 @@ export default function DisplayManager() {
       fetchDisplays();
     } catch (err: any) {
       console.error(err);
-      setError("Erro ao salvar: " + err.message);
+      if (err.message?.includes("min_order_value") || err.message?.includes("column")) {
+        setError("ERRO DE ESTRUTURA: A coluna 'min_order_value' não foi encontrada. Vá na aba 'USUÁRIOS' e execute os 'COMANDOS DE REPARO' no seu painel Supabase.");
+      } else {
+        setError("Erro ao salvar: " + err.message);
+      }
     } finally {
       setSaving(false);
     }
