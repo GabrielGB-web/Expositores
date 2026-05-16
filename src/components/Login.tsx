@@ -66,10 +66,10 @@ export default function Login() {
               <Package className="text-white w-8 h-8" />
             </div>
             <h1 className="font-black text-2xl uppercase tracking-tighter text-center leading-none">
-              Portal de Expositores // {isSignUp ? 'CADASTRO' : 'LOGÍSTICA'}
+              PORTAL DE EXPOSITORES FRANCAL
             </h1>
             <p className="text-[10px] font-mono font-bold text-[#141414]/40 mt-2 uppercase tracking-widest text-center">
-              {isSignUp ? 'Crie sua conta de colaborador' : 'Acesso Restrito a Colaboradores'}
+              {isSignUp ? 'CADASTRO DE COLABORADOR' : 'LOGÍSTICA E DISTRIBUIÇÃO'}
             </p>
           </div>
 

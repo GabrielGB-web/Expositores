@@ -150,7 +150,7 @@ export default function App() {
             <div className="bg-[#141414] p-1.5 rounded-sm">
               <Package className="text-white w-5 h-5" />
             </div>
-            <span className="font-black text-xl uppercase tracking-tighter italic">EXPO_MANAGER</span>
+            <span className="font-black text-xl uppercase tracking-tighter italic">PORTAL_FRANCAL</span>
           </div>
 
           <div className="flex items-center gap-4">

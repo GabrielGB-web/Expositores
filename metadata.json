@@ -1,5 +1,5 @@
 {
-  "name": "Gestor de Expositores PDV",
+  "name": "Portal de Expositores Francal",
   "description": "Sistema para solicitação de expositores e comprovação de entrega via Supabase.",
   "requestFramePermissions": [
     "camera"
