@@ -42,6 +42,24 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin, onStatusCha
     
     setProcessing(true);
     try {
+      // Se for rejeitar, precisamos devolver o estoque
+      if (newStatus === 'rejected') {
+        const { data: display, error: stockErr } = await supabase
+          .from('displays')
+          .select('stock')
+          .eq('id', request.display_id)
+          .single();
+
+        if (stockErr) throw new Error("Erro ao consultar estoque do expositor.");
+        
+        const { error: updateStockErr } = await supabase
+          .from('displays')
+          .update({ stock: (display?.stock || 0) + (request.quantity || 0) })
+          .eq('id', request.display_id);
+
+        if (updateStockErr) throw updateStockErr;
+      }
+
       const { error } = await supabase
         .from('requests')
         .update({ status: newStatus })
