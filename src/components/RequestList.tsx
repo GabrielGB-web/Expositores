@@ -1,12 +1,14 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Search, Filter, Loader2, PackageX, User, X } from 'lucide-react';
+import { Search, Filter, Loader2, PackageX, User, X, Clock, CheckCircle2, ThumbsUp, XCircle, Layers } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { DisplayRequest, DEPARTMENTS } from '../types';
+import { DisplayRequest, DEPARTMENTS, RequestStatus } from '../types';
 import RequestCard from './RequestCard';
 
 interface RequestListProps {
   isAdmin?: boolean;
 }
+
+type StatusFilterType = 'TODOS' | RequestStatus;
 
 export default function RequestList({ isAdmin }: RequestListProps) {
   const [requests, setRequests] = useState<DisplayRequest[]>([]);
@@ -16,6 +18,7 @@ export default function RequestList({ isAdmin }: RequestListProps) {
   const [filter, setFilter] = useState<string>('');
   const [deptFilter, setDeptFilter] = useState<string>('TODOS');
   const [sellerFilter, setSellerFilter] = useState<string>('TODOS');
+  const [statusFilter, setStatusFilter] = useState<StatusFilterType>('TODOS');
 
   async function fetchRequests(isInitial = false) {
     try {
@@ -138,6 +141,25 @@ export default function RequestList({ isAdmin }: RequestListProps) {
     return Array.from(sellersMap.values()).sort((a, b) => a.email.localeCompare(b.email));
   }, [profilesList, requests]);
 
+  // Contadores de status (baseados no filtro de vendedor/departamento/texto se aplicável ou no total)
+  const statusCounts = useMemo(() => {
+    const counts = {
+      TODOS: requests.length,
+      pending: 0,
+      approved: 0,
+      delivered: 0,
+      rejected: 0,
+    };
+
+    requests.forEach(r => {
+      if (r.status && counts[r.status] !== undefined) {
+        counts[r.status]++;
+      }
+    });
+
+    return counts;
+  }, [requests]);
+
   const filteredRequests = requests.filter(r => {
     const matchesSearch = 
       r.display_name?.toLowerCase().includes(filter.toLowerCase()) ||
@@ -154,10 +176,26 @@ export default function RequestList({ isAdmin }: RequestListProps) {
       r.user_email?.toLowerCase() === sellerFilter.toLowerCase() ||
       (profilesList.find(p => p.email.toLowerCase() === sellerFilter.toLowerCase())?.id === r.user_id);
     
-    return matchesSearch && matchesDept && matchesSeller;
+    const matchesStatus = statusFilter === 'TODOS' || r.status === statusFilter;
+
+    return matchesSearch && matchesDept && matchesSeller && matchesStatus;
   });
 
-  const hasActiveFilters = deptFilter !== 'TODOS' || (isAdmin && sellerFilter !== 'TODOS') || filter.trim() !== '';
+  const hasActiveFilters = 
+    deptFilter !== 'TODOS' || 
+    (isAdmin && sellerFilter !== 'TODOS') || 
+    statusFilter !== 'TODOS' || 
+    filter.trim() !== '';
+
+  const getStatusLabel = (st: StatusFilterType) => {
+    switch (st) {
+      case 'pending': return 'Pendente';
+      case 'approved': return 'Aprovado';
+      case 'delivered': return 'Concluído';
+      case 'rejected': return 'Reprovado';
+      default: return 'Todos';
+    }
+  };
 
   if (loading) {
     return (
@@ -186,6 +224,104 @@ export default function RequestList({ isAdmin }: RequestListProps) {
 
   return (
     <div className="space-y-6">
+      {/* Status Filter Tabs / Quick Select */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+        <button
+          onClick={() => setStatusFilter('TODOS')}
+          className={`p-3 border-2 border-[#141414] flex items-center justify-between transition-all text-left ${
+            statusFilter === 'TODOS'
+              ? 'bg-[#141414] text-white shadow-[4px_4px_0px_0px_rgba(20,20,20,0.3)]'
+              : 'bg-white hover:bg-[#141414]/5 text-[#141414]'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Layers className="w-4 h-4 shrink-0" />
+            <span className="text-[11px] font-black uppercase tracking-wider">Todos</span>
+          </div>
+          <span className={`text-[10px] font-mono font-black px-1.5 py-0.5 rounded-xs ${
+            statusFilter === 'TODOS' ? 'bg-white/20 text-white' : 'bg-[#141414]/10 text-[#141414]'
+          }`}>
+            {statusCounts.TODOS}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setStatusFilter('pending')}
+          className={`p-3 border-2 border-[#141414] flex items-center justify-between transition-all text-left ${
+            statusFilter === 'pending'
+              ? 'bg-amber-500 border-amber-600 text-white shadow-[4px_4px_0px_0px_rgba(245,158,11,0.4)]'
+              : 'bg-white hover:bg-amber-50/50 text-[#141414]'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Clock className={`w-4 h-4 shrink-0 ${statusFilter === 'pending' ? 'text-white' : 'text-amber-600'}`} />
+            <span className="text-[11px] font-black uppercase tracking-wider">Pendentes</span>
+          </div>
+          <span className={`text-[10px] font-mono font-black px-1.5 py-0.5 rounded-xs ${
+            statusFilter === 'pending' ? 'bg-white/30 text-white' : 'bg-amber-100 text-amber-900 border border-amber-300'
+          }`}>
+            {statusCounts.pending}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setStatusFilter('approved')}
+          className={`p-3 border-2 border-[#141414] flex items-center justify-between transition-all text-left ${
+            statusFilter === 'approved'
+              ? 'bg-blue-600 border-blue-700 text-white shadow-[4px_4px_0px_0px_rgba(37,99,235,0.4)]'
+              : 'bg-white hover:bg-blue-50/50 text-[#141414]'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <ThumbsUp className={`w-4 h-4 shrink-0 ${statusFilter === 'approved' ? 'text-white' : 'text-blue-600'}`} />
+            <span className="text-[11px] font-black uppercase tracking-wider">Aprovados</span>
+          </div>
+          <span className={`text-[10px] font-mono font-black px-1.5 py-0.5 rounded-xs ${
+            statusFilter === 'approved' ? 'bg-white/30 text-white' : 'bg-blue-100 text-blue-900 border border-blue-300'
+          }`}>
+            {statusCounts.approved}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setStatusFilter('delivered')}
+          className={`p-3 border-2 border-[#141414] flex items-center justify-between transition-all text-left ${
+            statusFilter === 'delivered'
+              ? 'bg-green-600 border-green-700 text-white shadow-[4px_4px_0px_0px_rgba(22,163,74,0.4)]'
+              : 'bg-white hover:bg-green-50/50 text-[#141414]'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className={`w-4 h-4 shrink-0 ${statusFilter === 'delivered' ? 'text-white' : 'text-green-600'}`} />
+            <span className="text-[11px] font-black uppercase tracking-wider">Concluídos</span>
+          </div>
+          <span className={`text-[10px] font-mono font-black px-1.5 py-0.5 rounded-xs ${
+            statusFilter === 'delivered' ? 'bg-white/30 text-white' : 'bg-green-100 text-green-900 border border-green-300'
+          }`}>
+            {statusCounts.delivered}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setStatusFilter('rejected')}
+          className={`col-span-2 sm:col-span-1 p-3 border-2 border-[#141414] flex items-center justify-between transition-all text-left ${
+            statusFilter === 'rejected'
+              ? 'bg-red-600 border-red-700 text-white shadow-[4px_4px_0px_0px_rgba(220,38,38,0.4)]'
+              : 'bg-white hover:bg-red-50/50 text-[#141414]'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <XCircle className={`w-4 h-4 shrink-0 ${statusFilter === 'rejected' ? 'text-white' : 'text-red-600'}`} />
+            <span className="text-[11px] font-black uppercase tracking-wider">Reprovados</span>
+          </div>
+          <span className={`text-[10px] font-mono font-black px-1.5 py-0.5 rounded-xs ${
+            statusFilter === 'rejected' ? 'bg-white/30 text-white' : 'bg-red-100 text-red-900 border border-red-300'
+          }`}>
+            {statusCounts.rejected}
+          </span>
+        </button>
+      </div>
+
       {/* Filters */}
       <div className="bg-white border-2 border-[#141414] p-4 flex flex-col gap-3 shadow-[4px_4px_0px_0px_rgba(20,20,20,1)]">
         <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center">
@@ -209,6 +345,24 @@ export default function RequestList({ isAdmin }: RequestListProps) {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* Status Dropdown Filter */}
+            <div className={`flex items-center gap-2 px-3 py-2 border-2 border-[#141414] flex-1 sm:flex-none transition-colors ${
+              statusFilter !== 'TODOS' ? 'bg-amber-50 border-amber-600' : 'bg-[#141414]/5'
+            }`}>
+              <Filter className="w-4 h-4 shrink-0" />
+              <select 
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as StatusFilterType)}
+                className="bg-transparent font-black uppercase text-[10px] outline-none cursor-pointer w-full"
+              >
+                <option value="TODOS">STATUS: TODOS ({requests.length})</option>
+                <option value="pending">PENDENTES ({statusCounts.pending})</option>
+                <option value="approved">APROVADOS ({statusCounts.approved})</option>
+                <option value="delivered">CONCLUÍDOS ({statusCounts.delivered})</option>
+                <option value="rejected">REPROVADOS ({statusCounts.rejected})</option>
+              </select>
+            </div>
+
             {/* Department Filter */}
             <div className="flex items-center gap-2 bg-[#141414]/5 px-3 py-2 border-2 border-[#141414] flex-1 sm:flex-none">
               <Filter className="w-4 h-4 shrink-0" />
@@ -267,6 +421,19 @@ export default function RequestList({ isAdmin }: RequestListProps) {
         {hasActiveFilters && (
           <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[#141414]/10 text-[10px] font-mono">
             <span className="font-bold text-[#141414]/50 uppercase">Filtros ativos:</span>
+            {statusFilter !== 'TODOS' && (
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 font-bold uppercase rounded-xs border ${
+                statusFilter === 'pending' ? 'bg-amber-100 text-amber-900 border-amber-300' :
+                statusFilter === 'approved' ? 'bg-blue-100 text-blue-900 border-blue-300' :
+                statusFilter === 'delivered' ? 'bg-green-100 text-green-900 border-green-300' :
+                'bg-red-100 text-red-900 border-red-300'
+              }`}>
+                Status: {getStatusLabel(statusFilter)}
+                <button onClick={() => setStatusFilter('TODOS')} className="hover:opacity-70 ml-0.5">
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
             {deptFilter !== 'TODOS' && (
               <span className="inline-flex items-center gap-1 bg-[#141414]/10 px-2 py-0.5 font-bold uppercase rounded-xs">
                 Depto: {deptFilter}
@@ -294,6 +461,7 @@ export default function RequestList({ isAdmin }: RequestListProps) {
             )}
             <button
               onClick={() => {
+                setStatusFilter('TODOS');
                 setDeptFilter('TODOS');
                 setSellerFilter('TODOS');
                 setFilter('');
@@ -315,6 +483,7 @@ export default function RequestList({ isAdmin }: RequestListProps) {
             {hasActiveFilters && (
               <button
                 onClick={() => {
+                  setStatusFilter('TODOS');
                   setDeptFilter('TODOS');
                   setSellerFilter('TODOS');
                   setFilter('');
@@ -339,3 +508,4 @@ export default function RequestList({ isAdmin }: RequestListProps) {
     </div>
   );
 }
+
