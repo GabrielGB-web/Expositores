@@ -75,15 +75,18 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Sessão expirada. Faça login novamente.");
 
-      // 2. Check if customer code already exists (Unique constraint check)
-      const { data: existingRequest, error: checkErr } = await supabase
+      // 2. Check if customer code already exists in this department (Unique per department)
+      const { data: existingRequests, error: checkErr } = await supabase
         .from('requests')
-        .select('id')
-        .eq('customer_code', formData.customerCode)
-        .maybeSingle();
+        .select('id, department, status')
+        .eq('customer_code', formData.customerCode.trim())
+        .eq('department', selectedDisplay.department)
+        .neq('status', 'rejected');
       
-      if (checkErr) throw new Error("Erro ao validar cliente.");
-      if (existingRequest) throw new Error(`Este Código de Cliente (${formData.customerCode}) já possui uma solicitação ativa.`);
+      if (checkErr) throw new Error("Erro ao validar cliente no departamento.");
+      if (existingRequests && existingRequests.length > 0) {
+        throw new Error(`Este Código de Cliente (${formData.customerCode.trim()}) já possui uma solicitação ativa no departamento "${selectedDisplay.department}".`);
+      }
 
       // 3. Create request
       const { error: err } = await supabase
