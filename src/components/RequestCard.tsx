@@ -193,6 +193,9 @@ const RequestCard: React.FC<RequestCardProps> = ({ request, isAdmin, onStatusCha
                     <span className="font-mono text-[9px] font-black bg-[#141414] text-white px-1.5 py-0.5 uppercase">
                       {request.display_code || '---'}
                     </span>
+                    <span className="font-mono text-[8px] font-black bg-purple-100 text-purple-900 border border-purple-300 px-1.5 py-0.5 uppercase">
+                      FILIAL {request.filial || '04'}
+                    </span>
                     <span className="font-mono text-[8px] font-black text-[#141414]/40 uppercase tracking-widest">
                       {request.department || 'DEPARTAMENTO N/A'}
                     </span>

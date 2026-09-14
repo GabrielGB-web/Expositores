@@ -1,21 +1,25 @@
 import React, { useState, useEffect } from 'react';
-import { Send, AlertCircle, Loader2, Check, Package, Info } from 'lucide-react';
+import { Send, AlertCircle, Loader2, Check, Package, Info, Filter, Building2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { Display, DEPARTMENTS } from '../types';
-import { Filter } from 'lucide-react';
+import { Display, DEFAULT_DEPARTMENTS } from '../types';
+import { getDepartmentsForFilial } from '../lib/departments';
 
 interface RequestFormProps {
   onSuccess: () => void;
+  userFilial?: string;
+  isAdmin?: boolean;
 }
 
-export default function RequestForm({ onSuccess }: RequestFormProps) {
+export default function RequestForm({ onSuccess, userFilial = '04', isAdmin = false }: RequestFormProps) {
+  const [selectedFilial, setSelectedFilial] = useState<string>(userFilial || '04');
   const [displays, setDisplays] = useState<Display[]>([]);
+  const [availableDepartments, setAvailableDepartments] = useState<string[]>(DEFAULT_DEPARTMENTS[userFilial as '04' | '02'] || DEFAULT_DEPARTMENTS['04']);
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
   const [selectedDisplay, setSelectedDisplay] = useState<Display | null>(null);
-  const [selectedDepartment, setSelectedDepartment] = useState<string>(DEPARTMENTS[0]);
+  const [selectedDepartment, setSelectedDepartment] = useState<string>('');
   const [formData, setFormData] = useState({
     orderNumber: '',
     customerCode: '',
@@ -24,9 +28,30 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
     quantity: '1',
   });
 
+  // Keep filial synced if prop changes
+  useEffect(() => {
+    if (userFilial) {
+      setSelectedFilial(userFilial);
+    }
+  }, [userFilial]);
+
+  // Load departments for selected filial
+  useEffect(() => {
+    async function loadDepts() {
+      const list = await getDepartmentsForFilial(selectedFilial);
+      setAvailableDepartments(list);
+      if (list.length > 0) {
+        setSelectedDepartment(list[0]);
+      }
+    }
+    loadDepts();
+  }, [selectedFilial]);
+
+  // Load displays
   useEffect(() => {
     async function fetchDisplays() {
       try {
+        setFetching(true);
         const { data, error: err } = await supabase
           .from('displays')
           .select('*')
@@ -36,7 +61,7 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
         setDisplays(data || []);
       } catch (err: any) {
         console.error("Error fetching displays:", err);
-        setError("Erro ao carregar catálogo: " + (err.message || "Verifique as chaves do Supabase e se a tabela 'displays' existe."));
+        setError("Erro ao carregar catálogo: " + (err.message || "Verifique se a tabela 'displays' existe."));
       } finally {
         setFetching(false);
       }
@@ -55,7 +80,7 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
     setError(null);
 
     try {
-      // 1. Check stock again
+      // 1. Check stock
       const { data: display, error: stockCheckErr } = await supabase
         .from('displays')
         .select('stock')
@@ -75,40 +100,45 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Sessão expirada. Faça login novamente.");
 
-      // 2. Check if customer code already exists in this department (Unique per department)
+      // 2. Check if customer code already exists in this department for this branch (Unique per department per filial)
       const { data: existingRequests, error: checkErr } = await supabase
         .from('requests')
-        .select('id, department, status')
+        .select('id, department, status, filial')
         .eq('customer_code', formData.customerCode.trim())
         .eq('department', selectedDisplay.department)
         .neq('status', 'rejected');
       
       if (checkErr) throw new Error("Erro ao validar cliente no departamento.");
-      if (existingRequests && existingRequests.length > 0) {
-        throw new Error(`Este Código de Cliente (${formData.customerCode.trim()}) já possui uma solicitação ativa no departamento "${selectedDisplay.department}".`);
+      
+      const duplicateInFilial = existingRequests?.find(r => (r.filial || '04') === selectedFilial);
+      if (duplicateInFilial) {
+        throw new Error(`Este Código de Cliente (${formData.customerCode.trim()}) já possui uma solicitação ativa na Filial ${selectedFilial} para a indústria/departamento "${selectedDisplay.department}".`);
       }
 
-      // 3. Create request
+      // 3. Create request with filial
+      const requestData: any = {
+        display_id: selectedDisplay.id,
+        display_name: selectedDisplay.name,
+        display_code: selectedDisplay.code || '---',
+        display_image: selectedDisplay.image_url,
+        order_number: formData.orderNumber,
+        customer_code: formData.customerCode,
+        customer_name: formData.customerName,
+        order_value: parseFloat(formData.orderValue),
+        quantity: quantityNum,
+        department: selectedDisplay.department,
+        filial: selectedFilial,
+        status: 'pending',
+        user_id: session.user.id
+      };
+
       const { error: err } = await supabase
         .from('requests')
-        .insert([{
-          display_id: selectedDisplay.id,
-          display_name: selectedDisplay.name,
-          display_code: selectedDisplay.code || '---',
-          display_image: selectedDisplay.image_url,
-          order_number: formData.orderNumber,
-          customer_code: formData.customerCode,
-          customer_name: formData.customerName,
-          order_value: parseFloat(formData.orderValue),
-          quantity: quantityNum,
-          department: selectedDisplay.department,
-          status: 'pending',
-          user_id: session.user.id
-        }]);
+        .insert([requestData]);
 
       if (err) throw err;
 
-      // 4. Update stock (Manual decrement)
+      // 4. Update stock
       await supabase
         .from('displays')
         .update({ stock: display.stock - quantityNum })
@@ -118,8 +148,8 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
     } catch (err: any) {
       console.error("Insert error:", err);
       const msg = err.message || "";
-      if (msg.includes("min_order_value") || msg.includes("column")) {
-        setError("ERRO DE ESTRUTURA: Colunas novas não encontradas. Vá na aba 'USUÁRIOS' e siga as instruções de 'COMANDOS DE REPARO' no seu painel Supabase.");
+      if (msg.includes("min_order_value") || msg.includes("filial") || msg.includes("column")) {
+        setError("ERRO DE ESTRUTURA: Colunas novas não encontradas no banco. Vá na aba 'USUÁRIOS' e execute os 'COMANDOS DE REPARO' no seu painel Supabase.");
       } else {
         setError('Falha ao enviar solicitação: ' + (err.message || 'Erro desconhecido'));
       }
@@ -132,13 +162,15 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
     setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
-  const filteredDisplays = displays.filter(d => d.department === selectedDepartment);
+  // Filter displays strictly by the active filial
+  const branchDisplays = displays.filter(d => (d.filial || '04') === selectedFilial);
+  const filteredDisplays = branchDisplays.filter(d => d.department === selectedDepartment);
 
   if (fetching) {
     return (
       <div className="flex flex-col items-center justify-center p-20 bg-white border-2 border-[#141414] shadow-[8px_8px_0px_0px_rgba(20,20,20,1)]">
         <Loader2 className="w-8 h-8 animate-spin text-[#141414]" />
-        <p className="mt-4 font-mono text-[10px] uppercase font-bold text-[#141414]/40">Carregando catálogo...</p>
+        <p className="mt-4 font-mono text-[10px] uppercase font-bold text-[#141414]/40">Carregando catálogo da Filial {selectedFilial}...</p>
       </div>
     );
   }
@@ -163,76 +195,148 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
     <div className="space-y-6">
       {/* Catalog Section */}
       <section className="bg-white border-2 border-[#141414] p-6 shadow-[8px_8px_0px_0px_rgba(20,20,20,1)]">
-        <div className="flex items-center justify-between mb-6 border-b-2 border-[#141414] pb-4">
-          <h2 className="text-xl font-black uppercase tracking-tighter flex items-center gap-2">
-            <Package className="w-6 h-6" />
-            Catálogo de Expositores
-          </h2>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 bg-[#141414]/5 px-3 py-2 border-2 border-[#141414]">
-                <Filter className="w-4 h-4" />
-                <select 
-                  value={selectedDepartment}
-                  onChange={(e) => {
-                    setSelectedDepartment(e.target.value);
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 border-b-2 border-[#141414] pb-4">
+          <div>
+            <h2 className="text-xl font-black uppercase tracking-tighter flex items-center gap-2">
+              <Package className="w-6 h-6" />
+              Catálogo de Expositores
+            </h2>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-[10px] font-mono font-black uppercase bg-purple-100 text-purple-900 border border-purple-300 px-2 py-0.5 inline-flex items-center gap-1">
+                <Building2 className="w-3 h-3" />
+                FILIAL {selectedFilial}
+              </span>
+              <span className="text-[10px] font-bold text-[#141414]/50 uppercase">
+                Visualizando catálogo exclusivo desta filial
+              </span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Admin Filial Switcher */}
+            {isAdmin && (
+              <div className="flex items-center border-2 border-[#141414] p-1 bg-white">
+                <span className="text-[8px] font-mono font-black uppercase text-[#141414]/50 px-2">Trocar Filial:</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedFilial('04');
                     setSelectedDisplay(null);
                   }}
-                  className="bg-transparent font-black uppercase text-[10px] outline-none cursor-pointer"
+                  className={`px-2.5 py-1 text-[9px] font-mono font-black uppercase transition-all ${
+                    selectedFilial === '04' ? 'bg-[#141414] text-white' : 'hover:bg-gray-100'
+                  }`}
                 >
-                  {DEPARTMENTS.map(dept => (
-                    <option key={dept} value={dept}>{dept}</option>
-                  ))}
-                </select>
+                  Filial 04
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedFilial('02');
+                    setSelectedDisplay(null);
+                  }}
+                  className={`px-2.5 py-1 text-[9px] font-mono font-black uppercase transition-all ${
+                    selectedFilial === '02' ? 'bg-[#141414] text-white' : 'hover:bg-gray-100'
+                  }`}
+                >
+                  Filial 02
+                </button>
+              </div>
+            )}
+
+            {/* Department Filter */}
+            <div className="flex items-center gap-2 bg-[#141414]/5 px-3 py-2 border-2 border-[#141414]">
+              <Filter className="w-4 h-4" />
+              <select 
+                value={selectedDepartment}
+                onChange={(e) => {
+                  setSelectedDepartment(e.target.value);
+                  setSelectedDisplay(null);
+                }}
+                className="bg-transparent font-black uppercase text-[10px] outline-none cursor-pointer"
+              >
+                {availableDepartments.map(dept => (
+                  <option key={dept} value={dept}>{dept}</option>
+                ))}
+              </select>
             </div>
+
             <div className="bg-[#141414] text-white text-[10px] font-bold px-3 py-1 uppercase tracking-widest hidden sm:block">
               {filteredDisplays.length} Disponíveis
             </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-          {filteredDisplays.map((display) => (
-            <button
-              key={display.id}
-              onClick={() => setSelectedDisplay(display)}
-              className={`group relative text-left border-2 transition-all p-2 ${
-                selectedDisplay?.id === display.id 
-                  ? 'border-[#141414] bg-[#141414]/5 shadow-[4px_4px_0px_0px_rgba(20,20,20,1)]' 
-                  : 'border-[#141414]/10 hover:border-[#141414]/30'
-              }`}
-            >
-              <div className="aspect-square bg-gray-100 border border-[#141414]/5 mb-3 overflow-hidden transition-all grayscale-[0.5] group-hover:grayscale-0">
-                <img 
-                  src={display.image_url} 
-                  alt={display.name} 
-                  className="w-full h-full object-cover"
-                />
-              </div>
-              <p className="text-xs font-black uppercase leading-none mb-1 truncate">{display.name}</p>
-              <p className="text-[9px] font-mono font-black text-[#141414]/40 mt-1 mb-2">COD: {display.code || '---'}</p>
-              <div className="flex flex-wrap items-center justify-between gap-1 mt-auto">
-                <span className={`text-[9px] font-mono font-black border px-1 ${
-                   display.stock > 0 ? 'bg-green-100 text-green-800 border-green-200' : 'bg-red-100 text-red-800 border-red-200'
-                }`}>
-                  QTD: {display.stock}
-                </span>
-                {display.min_order_value > 0 && (
-                  <span className="text-[9px] font-mono font-black border bg-blue-100 text-blue-800 border-blue-200 px-1">
-                    MIN: R${display.min_order_value}
+        {branchDisplays.length === 0 ? (
+          <div className="text-center py-12 border-2 border-dashed border-[#141414]/10">
+            <p className="text-xs font-black uppercase text-[#141414]/40 tracking-widest">
+              Nenhum expositor cadastrado para a Filial {selectedFilial}.
+            </p>
+            {isAdmin && (
+              <p className="text-[10px] font-bold text-blue-600 mt-2 uppercase">
+                Acesse a aba "Catálogo" para cadastrar novos modelos para a Filial {selectedFilial}.
+              </p>
+            )}
+          </div>
+        ) : filteredDisplays.length === 0 ? (
+          <div className="text-center py-12 border-2 border-dashed border-[#141414]/10">
+            <p className="text-xs font-black uppercase text-[#141414]/40 tracking-widest">
+              Nenhum expositor encontrado na indústria "{selectedDepartment}" para a Filial {selectedFilial}.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            {filteredDisplays.map((display) => (
+              <button
+                key={display.id}
+                onClick={() => setSelectedDisplay(display)}
+                className={`group relative text-left border-2 transition-all p-2 ${
+                  selectedDisplay?.id === display.id 
+                    ? 'border-[#141414] bg-[#141414]/5 shadow-[4px_4px_0px_0px_rgba(20,20,20,1)]' 
+                    : 'border-[#141414]/10 hover:border-[#141414]/30'
+                }`}
+              >
+                <div className="aspect-square bg-gray-100 border border-[#141414]/5 mb-3 overflow-hidden transition-all grayscale-[0.5] group-hover:grayscale-0">
+                  <img 
+                    src={display.image_url} 
+                    alt={display.name} 
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <p className="text-xs font-black uppercase leading-none mb-1 truncate">{display.name}</p>
+                <div className="flex items-center gap-1.5 mt-1 mb-2">
+                  <p className="text-[9px] font-mono font-black text-[#141414]/40">COD: {display.code || '---'}</p>
+                  <span className="text-[8px] font-mono font-black bg-purple-100 text-purple-900 px-1">F{display.filial || '04'}</span>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-1 mt-auto">
+                  <span className={`text-[9px] font-mono font-black border px-1 ${
+                     display.stock > 0 ? 'bg-green-100 text-green-800 border-green-200' : 'bg-red-100 text-red-800 border-red-200'
+                  }`}>
+                    QTD: {display.stock}
                   </span>
-                )}
-                {selectedDisplay?.id === display.id && <Check className="w-4 h-4 text-[#141414]" />}
-              </div>
-            </button>
-          ))}
-        </div>
+                  {display.min_order_value > 0 && (
+                    <span className="text-[9px] font-mono font-black border bg-blue-100 text-blue-800 border-blue-200 px-1">
+                      MIN: R${display.min_order_value}
+                    </span>
+                  )}
+                  {selectedDisplay?.id === display.id && <Check className="w-4 h-4 text-[#141414]" />}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* Form Section */}
       <section className={`bg-white border-2 border-[#141414] p-6 shadow-[8px_8px_0px_0px_rgba(20,20,20,1)] transition-all ${!selectedDisplay ? 'opacity-50 pointer-events-none grayscale' : ''}`}>
-        <div className="flex items-center gap-2 mb-6">
-          <Send className="w-5 h-5" />
-          <h2 className="text-lg font-black uppercase tracking-tighter">Dados da Solicitação</h2>
+        <div className="flex items-center justify-between mb-6 border-b border-[#141414]/10 pb-4">
+          <div className="flex items-center gap-2">
+            <Send className="w-5 h-5" />
+            <h2 className="text-lg font-black uppercase tracking-tighter">Dados da Solicitação</h2>
+          </div>
+          <span className="text-[10px] font-mono font-black uppercase bg-purple-100 text-purple-900 border border-purple-300 px-2 py-0.5">
+            Destino: FILIAL {selectedFilial}
+          </span>
         </div>
 
         {!selectedDisplay && (
@@ -243,7 +347,7 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="space-y-1">
               <label className="text-[10px] font-black uppercase tracking-widest text-[#141414]/40">Número do Pedido</label>
               <input
@@ -253,7 +357,7 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
                 value={formData.orderNumber}
                 onChange={handleChange}
                 placeholder="EX: #9900"
-                className="w-full border-2 border-[#141414] p-3 font-mono font-bold focus:bg-[#141414]/5 outline-none transition-colors"
+                className="w-full border-2 border-[#141414] p-3 font-mono font-bold focus:bg-[#141414]/5 outline-none transition-colors text-sm"
                 disabled={loading}
               />
             </div>
@@ -267,7 +371,7 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
                 value={formData.customerCode}
                 onChange={handleChange}
                 placeholder="EX: CL_123"
-                className="w-full border-2 border-[#141414] p-3 font-mono font-bold focus:bg-[#141414]/5 outline-none transition-colors"
+                className="w-full border-2 border-[#141414] p-3 font-mono font-bold focus:bg-[#141414]/5 outline-none transition-colors text-sm"
                 disabled={loading}
               />
             </div>
@@ -281,7 +385,7 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
                 value={formData.customerName}
                 onChange={handleChange}
                 placeholder="NOME DA LOJA"
-                className="w-full border-2 border-[#141414] p-3 font-mono font-bold focus:bg-[#141414]/5 outline-none transition-colors"
+                className="w-full border-2 border-[#141414] p-3 font-mono font-bold focus:bg-[#141414]/5 outline-none transition-colors text-sm"
                 disabled={loading}
               />
             </div>
@@ -296,7 +400,7 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
                 value={formData.orderValue}
                 onChange={handleChange}
                 placeholder="0.00"
-                className="w-full border-2 border-[#141414] p-3 font-mono font-bold focus:bg-[#141414]/5 outline-none transition-colors"
+                className="w-full border-2 border-[#141414] p-3 font-mono font-bold focus:bg-[#141414]/5 outline-none transition-colors text-sm"
                 disabled={loading}
               />
             </div>
@@ -311,7 +415,7 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
                 max={selectedDisplay?.stock || 1}
                 value={formData.quantity}
                 onChange={handleChange}
-                className="w-full border-2 border-[#141414] p-3 font-mono font-bold focus:bg-[#141414]/5 outline-none transition-colors"
+                className="w-full border-2 border-[#141414] p-3 font-mono font-bold focus:bg-[#141414]/5 outline-none transition-colors text-sm"
                 disabled={loading}
               />
             </div>
@@ -332,9 +436,9 @@ export default function RequestForm({ onSuccess }: RequestFormProps) {
             {loading ? (
               <div className="flex items-center justify-center gap-2">
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Processando...
+                Processando Envio para Filial {selectedFilial}...
               </div>
-            ) : 'Confirmar Solicitação de Envio'}
+            ) : `Confirmar Solicitação de Envio (FILIAL ${selectedFilial})`}
           </button>
         </form>
       </section>

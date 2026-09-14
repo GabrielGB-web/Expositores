@@ -1,10 +1,23 @@
 export type RequestStatus = 'pending' | 'approved' | 'delivered' | 'rejected';
 export type UserRole = 'admin' | 'vendedor';
+export type FilialId = '04' | '02';
+
+export interface Filial {
+  id: FilialId;
+  name: string;
+  code: string;
+}
+
+export const FILIAIS: Filial[] = [
+  { id: '04', name: 'Filial 04', code: 'FILIAL 04' },
+  { id: '02', name: 'Filial 02', code: 'FILIAL 02' }
+];
 
 export interface Profile {
   id: string;
   email: string;
   role: UserRole;
+  filial?: string;
 }
 
 export interface Display {
@@ -15,6 +28,7 @@ export interface Display {
   stock: number;
   department: string;
   min_order_value?: number;
+  filial?: string;
 }
 
 export interface DisplayRequest {
@@ -35,12 +49,24 @@ export interface DisplayRequest {
   user_id: string;
   user_email?: string;
   department?: string;
+  filial?: string;
 }
 
-export const DEPARTMENTS = [
-  'ELMA CHIPS',
-  'MONDELEZ',
-  'FELTRIN',
-  'CALÇADOS',
-  'AB MAURY'
-];
+export const DEFAULT_DEPARTMENTS: Record<string, string[]> = {
+  '04': [
+    'ELMA CHIPS',
+    'MONDELEZ',
+    'FELTRIN',
+    'CALÇADOS',
+    'AB MAURY'
+  ],
+  '02': [
+    'ELMA CHIPS',
+    'MONDELEZ',
+    'FELTRIN',
+    'BEBIDAS',
+    'DOCES'
+  ]
+};
+
+export const DEPARTMENTS = DEFAULT_DEPARTMENTS['04'];

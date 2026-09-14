@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Shield, User, Search, Loader2, AlertCircle, Trash2, Link as LinkIcon, Copy, Check, UserPlus, Key, Info } from 'lucide-react';
+import { Users, Shield, User, Search, Loader2, AlertCircle, Trash2, Copy, Check, UserPlus, Key, Info, Edit3, X, CheckCircle2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
 import { Profile } from '../types';
@@ -15,10 +15,24 @@ const UserManagement: React.FC = () => {
   // Form states for NEW user
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [newRole, setNewRole] = useState<'vendedor' | 'admin'>('vendedor');
+  const [newFilial, setNewFilial] = useState<string>('04');
+  const [filialFilter, setFilialFilter] = useState<string>('TODAS');
   const [isCreatingUser, setIsCreatingUser] = useState(false);
 
+  // Modal states for EDIT and DELETE
+  const [userToDelete, setUserToDelete] = useState<Profile | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const [userToEdit, setUserToEdit] = useState<Profile | null>(null);
+  const [editRole, setEditRole] = useState<'vendedor' | 'admin'>('vendedor');
+  const [editFilial, setEditFilial] = useState<string>('04');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  // In-app notifications
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
   const inviteLink = `${window.location.origin}?signup=true`;
-  const isDevUrl = window.location.href.includes('ais-dev-');
 
   const copyInviteLink = () => {
     navigator.clipboard.writeText(inviteLink);
@@ -30,11 +44,12 @@ const UserManagement: React.FC = () => {
     e.preventDefault();
     if (!newEmail || !newPassword) return;
     if (newPassword.length < 6) {
-      alert("A senha deve ter pelo menos 6 caracteres.");
+      setFeedback({ type: 'error', message: "A senha provisória deve ter pelo menos 6 caracteres." });
       return;
     }
 
     setIsCreatingUser(true);
+    setFeedback(null);
     try {
       // Criamos um client temporário SEM persistência de sessão para não deslogar o Admin
       const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
@@ -52,26 +67,32 @@ const UserManagement: React.FC = () => {
       if (error) throw error;
       
       if (data.user) {
-        // Agora forçamos a criação do perfil com role vendedor
+        // Criamos ou atualizamos o perfil com role e filial selecionados
         const { error: profileError } = await supabase
           .from('profiles')
-          .insert([{ 
+          .upsert([{ 
             id: data.user.id, 
             email: newEmail, 
-            role: 'vendedor' 
+            role: newRole,
+            filial: newFilial
           }]);
         
         if (profileError) {
           console.warn("Usuário criado na Auth, mas erro no perfil:", profileError.message);
         }
         
-        alert("USUÁRIO CADASTRADO COM SUCESSO!\n\nEle(a) já pode logar com este e-mail e senha.");
+        setFeedback({
+          type: 'success',
+          message: `Usuário ${newEmail} cadastrado com sucesso na FILIAL ${newFilial} como ${newRole.toUpperCase()}!`
+        });
         setNewEmail('');
         setNewPassword('');
+        setNewRole('vendedor');
+        setNewFilial('04');
         fetchProfiles();
       }
     } catch (err: any) {
-      alert("ERRO AO CADASTRAR: " + err.message);
+      setFeedback({ type: 'error', message: "Erro ao cadastrar usuário: " + err.message });
     } finally {
       setIsCreatingUser(false);
     }
@@ -91,8 +112,6 @@ const UserManagement: React.FC = () => {
       
       if (error) {
         console.error("DEBUG: Erro ao buscar perfis:", error);
-        
-        // Se falhou por RLS/Recursão, tenta pelo menos pegar o próprio perfil para não ficar vazio
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           const { data: ownProfile } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
@@ -101,23 +120,41 @@ const UserManagement: React.FC = () => {
             return;
           }
         }
-        
         throw new Error(error.message + " (Código: " + error.code + ")");
       }
       
-      console.log("DEBUG: Perfis encontrados:", data?.length);
       setProfiles(data || []);
-      
     } catch (err: any) {
       console.error("Error fetching profiles:", err);
-      // Se for erro de recursão, mostramos a interface de reparo
       if (err.message?.includes('recursion')) {
         setErrorState(err.message);
       } else {
-        alert("Erro ao carregar usuários: " + err.message);
+        setFeedback({ type: 'error', message: "Erro ao carregar usuários: " + err.message });
       }
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function toggleFilial(id: string, currentFilial?: string) {
+    if (updating) return;
+    const current = currentFilial || '04';
+    const nextFilial = current === '04' ? '02' : '04';
+
+    try {
+      setUpdating(id);
+      const { error } = await supabase
+        .from('profiles')
+        .update({ filial: nextFilial })
+        .eq('id', id);
+
+      if (error) throw error;
+      setProfiles(prev => prev.map(p => p.id === id ? { ...p, filial: nextFilial } : p));
+      setFeedback({ type: 'success', message: `Filial alterada para FILIAL ${nextFilial}!` });
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: "Erro ao alterar filial: " + err.message });
+    } finally {
+      setUpdating(null);
     }
   }
 
@@ -126,7 +163,7 @@ const UserManagement: React.FC = () => {
     const newRole = currentRole === 'admin' ? 'vendedor' : 'admin';
     
     if (newRole === 'vendedor' && profiles.filter(p => p.role === 'admin').length <= 1) {
-      alert("Não é possível remover o último administrador.");
+      setFeedback({ type: 'error', message: "Não é possível rebaixar o único administrador." });
       return;
     }
 
@@ -139,69 +176,141 @@ const UserManagement: React.FC = () => {
       
       if (error) throw error;
       setProfiles(prev => prev.map(p => p.id === id ? { ...p, role: newRole as any } : p));
+      setFeedback({ type: 'success', message: `Cargo alterado para ${newRole.toUpperCase()}!` });
     } catch (err: any) {
-      alert("Erro ao atualizar cargo: " + err.message);
+      setFeedback({ type: 'error', message: "Erro ao atualizar cargo: " + err.message });
     } finally {
       setUpdating(null);
     }
   }
 
-  async function deleteProfile(id: string) {
+  function openEditModal(profile: Profile) {
+    setUserToEdit(profile);
+    setEditRole(profile.role);
+    setEditFilial(profile.filial || '04');
+  }
+
+  async function handleSaveEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!userToEdit) return;
+
+    setIsSavingEdit(true);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          role: editRole,
+          filial: editFilial
+        })
+        .eq('id', userToEdit.id);
+
+      if (error) throw error;
+
+      setProfiles(prev => prev.map(p => 
+        p.id === userToEdit.id ? { ...p, role: editRole, filial: editFilial } : p
+      ));
+
+      setFeedback({
+        type: 'success',
+        message: `Usuário ${userToEdit.email} atualizado para FILIAL ${editFilial} e cargo ${editRole.toUpperCase()} com sucesso!`
+      });
+      setUserToEdit(null);
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: "Erro ao salvar alterações: " + err.message });
+    } finally {
+      setIsSavingEdit(false);
+    }
+  }
+
+  async function handleConfirmDelete() {
+    if (!userToDelete) return;
+
     const { data: { user } } = await supabase.auth.getUser();
-    if (user?.id === id) {
-      alert("Você não pode excluir seu próprio perfil de administrador.");
+    if (user?.id === userToDelete.id) {
+      setFeedback({ type: 'error', message: "Você não pode excluir sua própria conta de administrador." });
+      setUserToDelete(null);
       return;
     }
 
-    if (!confirm("Isso removerá as permissões e TODOS OS REGISTROS deste vendedor. Você tem certeza?")) return;
-
+    setIsDeleting(true);
     try {
-      setUpdating(id);
-      
-      // 1. Primeiro removemos as solicitações vinculadas para não dar erro de chave estrangeira
-      const { error: reqError } = await supabase
-        .from('requests')
-        .delete()
-        .eq('user_id', id);
-      
-      if (reqError) {
-        console.error("Erro ao limpar solicitações:", reqError);
-        throw new Error("Falha ao limpar registros de entrega: " + reqError.message);
+      // 1. Limpar solicitações vinculadas para não conflitar com foreign keys
+      try {
+        await supabase
+          .from('requests')
+          .delete()
+          .eq('user_id', userToDelete.id);
+      } catch (reqErr) {
+        console.warn("Aviso ao deletar solicitações vinculadas:", reqErr);
       }
 
-      // 2. Removemos o perfil
-      const { error } = await supabase.from('profiles').delete().eq('id', id);
-      
+      // 2. Deletar da tabela profiles
+      const { error } = await supabase
+        .from('profiles')
+        .delete()
+        .eq('id', userToDelete.id);
+
       if (error) {
         console.error("Erro ao deletar perfil:", error);
-        if (error.message.includes('foreign key')) {
-          throw new Error("O usuário ainda possui registros vinculados em outras tabelas. Exclua-os manualmente no Supabase.");
-        }
         throw error;
       }
-      
-      setProfiles(prev => prev.filter(p => p.id !== id));
-      alert("USUÁRIO E SEUS DADOS EXCLUÍDOS COM SUCESSO!");
+
+      setProfiles(prev => prev.filter(p => p.id !== userToDelete.id));
+      setFeedback({ 
+        type: 'success', 
+        message: `Usuário ${userToDelete.email || userToDelete.id} excluído com sucesso!` 
+      });
+      setUserToDelete(null);
     } catch (err: any) {
       console.error("Erro completo ao excluir:", err);
-      alert("ERRO CRÍTICO NA EXCLUSÃO:\n" + (err.message || "Verifique o console do navegador."));
+      setFeedback({ 
+        type: 'error', 
+        message: "Erro ao excluir usuário: " + (err.message || "Verifique permissões no banco Supabase.") 
+      });
     } finally {
-      setUpdating(null);
+      setIsDeleting(false);
     }
   }
 
-  const filtered = profiles.filter(p => 
-    p.email?.toLowerCase().includes(filter.toLowerCase()) || 
-    p.role.toLowerCase().includes(filter.toLowerCase())
-  );
+  const filtered = profiles.filter(p => {
+    const matchesQuery = p.email?.toLowerCase().includes(filter.toLowerCase()) || 
+      p.role.toLowerCase().includes(filter.toLowerCase());
+    const userFilial = p.filial || '04';
+    const matchesFilial = filialFilter === 'TODAS' || userFilial === filialFilter;
+    return matchesQuery && matchesFilial;
+  });
 
   return (
     <div className="space-y-8">
+      {/* Top Banner Alert / Feedback */}
+      {feedback && (
+        <div className={`p-4 border-2 flex items-center justify-between gap-4 shadow-[4px_4px_0px_0px_rgba(20,20,20,1)] ${
+          feedback.type === 'success' 
+            ? 'bg-green-100 border-green-700 text-green-950' 
+            : 'bg-red-100 border-red-700 text-red-950'
+        }`}>
+          <div className="flex items-center gap-3">
+            {feedback.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 text-green-700 shrink-0" />
+            ) : (
+              <AlertCircle className="w-5 h-5 text-red-700 shrink-0" />
+            )}
+            <p className="text-xs font-bold uppercase tracking-wider">{feedback.message}</p>
+          </div>
+          <button 
+            onClick={() => setFeedback(null)}
+            className="p-1 hover:opacity-60"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Header Section */}
       <div className="bg-[#141414] text-white p-6 shadow-[8px_8px_0px_0px_rgba(20,20,20,0.3)] flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
           <h1 className="text-2xl font-black uppercase tracking-tighter italic">Gestão de Equipe</h1>
-          <p className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-50 mt-1">Configuração de Vendedores e Acessos</p>
+          <p className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-50 mt-1">Configuração de Vendedores, Filiais e Acessos</p>
         </div>
         
         <div className="bg-white/5 border border-white/10 p-4 rounded-lg flex flex-col gap-2 min-w-[300px]">
@@ -235,20 +344,20 @@ const UserManagement: React.FC = () => {
                 <UserPlus className="w-6 h-6 text-white" />
               </div>
               <div>
-                <h2 className="font-black uppercase text-sm leading-tight tracking-tighter">Novo Vendedor</h2>
-                <p className="text-[8px] font-bold uppercase tracking-widest text-[#141414]/40">Cadastrar manualmente</p>
+                <h2 className="font-black uppercase text-sm leading-tight tracking-tighter">Novo Usuário</h2>
+                <p className="text-[8px] font-bold uppercase tracking-widest text-[#141414]/40">Cadastrar por Filial</p>
               </div>
             </div>
 
             <div className="space-y-4">
               <div className="space-y-1">
-                <label className="text-[9px] font-black uppercase tracking-widest text-[#141414]/60">E-mail do Vendedor</label>
+                <label className="text-[9px] font-black uppercase tracking-widest text-[#141414]/60">E-mail</label>
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#141414]/40" />
                   <input 
-                    type="email"
+                    type="email" 
                     required
-                    placeholder="vendedor@empresa.com"
+                    placeholder="usuario@empresa.com"
                     value={newEmail}
                     onChange={e => setNewEmail(e.target.value)}
                     className="w-full pl-10 pr-4 py-3 border-2 border-[#141414] font-mono text-xs font-bold outline-none focus:bg-blue-50 transition-colors"
@@ -257,17 +366,42 @@ const UserManagement: React.FC = () => {
               </div>
 
               <div className="space-y-1">
-                <label className="text-[9px] font-black uppercase tracking-widest text-[#141414]/60">Senha de Acesso</label>
+                <label className="text-[9px] font-black uppercase tracking-widest text-[#141414]/60">Senha Provisória</label>
                 <div className="relative">
                   <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#141414]/40" />
                   <input 
-                    type="password"
+                    type="password" 
                     required
                     placeholder="Mínimo 6 caracteres"
                     value={newPassword}
                     onChange={e => setNewPassword(e.target.value)}
                     className="w-full pl-10 pr-4 py-3 border-2 border-[#141414] font-mono text-xs font-bold outline-none focus:bg-blue-50 transition-colors"
                   />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black uppercase tracking-widest text-[#141414]/60">Filial</label>
+                  <select
+                    value={newFilial}
+                    onChange={e => setNewFilial(e.target.value)}
+                    className="w-full border-2 border-[#141414] py-2.5 px-2 font-mono font-black text-xs uppercase bg-white outline-none"
+                  >
+                    <option value="04">FILIAL 04</option>
+                    <option value="02">FILIAL 02</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black uppercase tracking-widest text-[#141414]/60">Cargo</label>
+                  <select
+                    value={newRole}
+                    onChange={e => setNewRole(e.target.value as any)}
+                    className="w-full border-2 border-[#141414] py-2.5 px-2 font-mono font-black text-xs uppercase bg-white outline-none"
+                  >
+                    <option value="vendedor">VENDEDOR</option>
+                    <option value="admin">ADMIN</option>
+                  </select>
                 </div>
               </div>
 
@@ -287,7 +421,7 @@ const UserManagement: React.FC = () => {
               <div className="bg-gray-50 border border-[#141414]/10 p-3 flex gap-3 mt-4">
                 <Info className="w-4 h-4 text-[#141414]/40 shrink-0" />
                 <p className="text-[8px] font-medium text-[#141414]/40 uppercase leading-normal italic">
-                  O vendedor poderá logar imediatamente após você clicar em criar. Passa os dados para ele.
+                  O usuário verá estritamente os expositores e pedidos da filial designada.
                 </p>
               </div>
             </div>
@@ -295,7 +429,61 @@ const UserManagement: React.FC = () => {
         </div>
 
         {/* Right Column: List and Filters */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="lg:col-span-2 space-y-4">
+          {/* Always-visible Search and Filial Filter Bar */}
+          <div className="bg-white border-2 border-[#141414] p-4 shadow-[4px_4px_0px_0px_rgba(20,20,20,1)] flex flex-col sm:flex-row gap-4 justify-between items-center">
+            <div className="relative flex-1 w-full">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#141414]/40" />
+              <input 
+                type="text" 
+                placeholder="BUSCAR USUÁRIO..."
+                value={filter}
+                onChange={e => setFilter(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border-2 border-[#141414] font-mono text-xs font-bold focus:bg-white outline-none"
+              />
+            </div>
+
+            {/* Filial Filter */}
+            <div className="flex items-center gap-1 border-2 border-[#141414] p-1 bg-white shrink-0">
+              <span className="text-[8px] font-mono font-black uppercase text-[#141414]/40 px-1">Filial:</span>
+              <button
+                type="button"
+                onClick={() => setFilialFilter('TODAS')}
+                className={`px-3 py-1 font-mono text-[9px] font-black uppercase transition-all ${
+                  filialFilter === 'TODAS' ? 'bg-[#141414] text-white' : 'text-[#141414] hover:bg-[#141414]/5'
+                }`}
+              >
+                TODAS ({profiles.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilialFilter('04')}
+                className={`px-3 py-1 font-mono text-[9px] font-black uppercase transition-all ${
+                  filialFilter === '04' ? 'bg-[#141414] text-white' : 'text-[#141414] hover:bg-[#141414]/5'
+                }`}
+              >
+                FILIAL 04 ({profiles.filter(p => (p.filial || '04') === '04').length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilialFilter('02')}
+                className={`px-3 py-1 font-mono text-[9px] font-black uppercase transition-all ${
+                  filialFilter === '02' ? 'bg-[#141414] text-white' : 'text-[#141414] hover:bg-[#141414]/5'
+                }`}
+              >
+                FILIAL 02 ({profiles.filter(p => (p.filial || '04') === '02').length})
+              </button>
+            </div>
+
+            <button 
+              type="button"
+              onClick={fetchProfiles}
+              className="px-4 py-2 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shrink-0"
+            >
+              Atualizar
+            </button>
+          </div>
+
           {loading ? (
             <div className="bg-white border-2 border-[#141414] p-12 flex flex-col items-center justify-center gap-4 shadow-[8px_8px_0px_0px_rgba(20,20,20,1)]">
               <Loader2 className="w-8 h-8 animate-spin text-[#141414]" />
@@ -307,52 +495,6 @@ const UserManagement: React.FC = () => {
               <div className="w-full">
                 <h3 className="font-black text-red-600 uppercase tracking-tighter italic">Erro de Recursão no Supabase</h3>
                 <p className="text-red-800 text-[10px] font-bold mt-2 uppercase">{errorState}</p>
-                <div className="mt-6 bg-[#141414] text-green-400 p-4 font-mono text-[10px] text-left border-4 border-red-600">
-                  <p className="text-white mb-2 font-black uppercase tracking-widest bg-red-600 inline-block px-2">Correção Final (Resolução de Loop):</p>
-                  <p className="mb-4 text-white/50">O erro persiste porque as regras antigas ainda estão no banco. Rode este comando de limpeza ABSOLUTA:</p>
-                  <pre className="whitespace-pre-wrap select-all">
-{`-- 1. Destrava total das tabelas
-ALTER TABLE profiles DISABLE ROW LEVEL SECURITY;
-ALTER TABLE requests DISABLE ROW LEVEL SECURITY;
-
--- 2. Limpeza total de políticas (Rode este bloco inteiro)
-DO $$ 
-DECLARE 
-    pol RECORD;
-BEGIN 
-    FOR pol IN (SELECT policyname, tablename FROM pg_policies WHERE tablename IN ('profiles', 'requests')) 
-    LOOP EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(pol.policyname) || ' ON ' || quote_ident(pol.tablename); END LOOP;
-END $$;
-
--- 3. Correção do Erro de Constraint e Novas Colunas
-ALTER TABLE requests ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1;
-ALTER TABLE requests ADD COLUMN IF NOT EXISTS department TEXT;
-ALTER TABLE requests ADD COLUMN IF NOT EXISTS display_code TEXT;
-ALTER TABLE displays ADD COLUMN IF NOT EXISTS department TEXT DEFAULT 'ELMA CHIPS';
-UPDATE displays SET department = 'ELMA CHIPS' WHERE department IS NULL;
-
-ALTER TABLE requests DROP CONSTRAINT IF EXISTS requests_status_check;
-ALTER TABLE requests ADD CONSTRAINT requests_status_check 
-CHECK (status IN ('pending', 'approved', 'delivered', 'rejected'));
-
--- 4. Recriação das regras administrativas (SEM RECURSÃO)
--- ADM PROFILE: ACESSO TOTAL
-CREATE POLICY "adm_master_profiles_v5" ON profiles FOR ALL 
-USING (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'));
-
--- ADM REQUESTS: ACESSO TOTAL
-CREATE POLICY "adm_master_requests_v5" ON requests FOR ALL 
-USING (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'));
-
--- VENDEDORES: ACESSO RESTRITO
-CREATE POLICY "vendedor_view_profile" ON profiles FOR SELECT USING (auth.uid() = id);
-CREATE POLICY "vendedor_manage_requests" ON requests FOR ALL USING (auth.uid() = user_id);
-
--- 5. Reativação Manual (Importante rodar)
-ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE requests ENABLE ROW LEVEL SECURITY;`}
-                  </pre>
-                </div>
               </div>
               <button 
                 onClick={fetchProfiles}
@@ -365,62 +507,42 @@ ALTER TABLE requests ENABLE ROW LEVEL SECURITY;`}
             <div className="bg-white border-2 border-dashed border-[#141414]/20 p-12 flex flex-col items-center justify-center text-center gap-4 shadow-[8px_8px_0px_0px_rgba(20,20,20,1)]">
               <AlertCircle className="w-12 h-12 text-[#141414]/20" />
               <div>
-                <h3 className="font-black text-xs uppercase tracking-[0.2em] text-[#141414]/40">Nenhum Usuário Encontrado</h3>
-                <p className="text-[10px] font-medium text-[#141414]/40 mt-2 max-w-xs">
-                  Sincronize seu perfil se ele não aparecer aqui.
+                <h3 className="font-black text-xs uppercase tracking-[0.2em] text-[#141414]/40">
+                  Nenhum Usuário {filialFilter !== 'TODAS' ? `na Filial ${filialFilter}` : 'Encontrado'}
+                </h3>
+                <p className="text-[10px] font-medium text-[#141414]/40 mt-2 max-w-sm">
+                  {filialFilter === '02' 
+                    ? 'Ainda não há usuários cadastrados na Filial 02. Você pode cadastrar um novo usuário para a Filial 02 no formulário à esquerda.'
+                    : 'Ajuste os filtros ou os termos da busca.'}
                 </p>
               </div>
-              <button 
-                onClick={async () => {
-                  const { data: { user } } = await supabase.auth.getUser();
-                  if (!user) return;
-                  const isOwnerEmail = user.email === 'admin@gmail.com' || user.email === 'gabrielicloudgb@gmail.com' || user.email === 'daniel@francal.com';
-                  try {
-                    const { error } = await supabase.from('profiles').upsert({
-                      id: user.id,
-                      email: user.email,
-                      role: isOwnerEmail ? 'admin' : 'vendedor'
-                    }, { onConflict: 'id' });
-                    if (error) throw error;
-                    alert("Sincronizado!");
-                    fetchProfiles();
-                  } catch (err: any) {
-                    alert("Erro: " + err.message);
-                  }
-                }}
-                className="px-6 py-3 bg-[#141414] text-white text-[10px] font-black uppercase tracking-widest hover:bg-opacity-80 transition-all"
-              >
-                Sincronizar meu Perfil
-              </button>
+              <div className="flex flex-wrap gap-2 mt-2">
+                <button
+                  type="button"
+                  onClick={() => setFilialFilter('TODAS')}
+                  className="px-4 py-2 border-2 border-[#141414] font-black uppercase text-[10px] tracking-widest hover:bg-[#141414] hover:text-white transition-all"
+                >
+                  Ver Todas as Filiais
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilialFilter('04')}
+                  className="px-4 py-2 bg-[#141414] text-white font-black uppercase text-[10px] tracking-widest hover:opacity-80 transition-all"
+                >
+                  Voltar para Filial 04
+                </button>
+              </div>
             </div>
           ) : (
             <section className="bg-white border-2 border-[#141414] shadow-[8px_8px_0px_0px_rgba(20,20,20,1)] overflow-hidden">
-              <div className="p-4 border-b-2 border-[#141414] bg-gray-50 flex flex-col sm:flex-row gap-4 justify-between items-center">
-                <div className="relative flex-1 w-full">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#141414]/40" />
-                  <input 
-                    type="text" 
-                    placeholder="BUSCAR VENDEDOR..."
-                    value={filter}
-                    onChange={e => setFilter(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 border-2 border-[#141414] font-mono text-xs font-bold focus:bg-white outline-none"
-                  />
-                </div>
-                <button 
-                  onClick={fetchProfiles}
-                  className="px-4 py-2 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all"
-                >
-                  Atualizar
-                </button>
-              </div>
-
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse">
                   <thead>
                     <tr className="bg-[#141414] text-white text-left">
                       <th className="p-4 text-[10px] font-black uppercase tracking-widest">Usuário</th>
+                      <th className="p-4 text-[10px] font-black uppercase tracking-widest">Filial</th>
                       <th className="p-4 text-[10px] font-black uppercase tracking-widest">Cargo</th>
-                      <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest">Ações</th>
+                      <th className="p-4 text-right text-[10px] font-black uppercase tracking-widest">Ações Rápidas</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -431,27 +553,58 @@ ALTER TABLE requests ENABLE ROW LEVEL SECURITY;`}
                           <p className="text-[8px] font-bold text-[#141414]/40 uppercase">ID: {p.id}</p>
                         </td>
                         <td className="p-4">
-                          <span className={`text-[8px] font-black uppercase px-2 py-1 italic tracking-widest ${
-                            p.role === 'admin' ? 'bg-red-600 text-white' : 'bg-blue-600 text-white'
-                          }`}>
-                            {p.role}
-                          </span>
+                          <button
+                            type="button"
+                            onClick={() => toggleFilial(p.id, p.filial)}
+                            disabled={updating === p.id}
+                            title="Clique para alternar rapidamente entre Filial 04 e Filial 02"
+                            className={`font-mono text-[9px] font-black uppercase px-2.5 py-1 border-2 transition-all ${
+                              (p.filial || '04') === '02'
+                                ? 'bg-amber-100 text-amber-900 border-amber-500 hover:bg-amber-200'
+                                : 'bg-purple-100 text-purple-900 border-purple-500 hover:bg-purple-200'
+                            }`}
+                          >
+                            FILIAL {p.filial || '04'} ⇄
+                          </button>
+                        </td>
+                        <td className="p-4">
+                          <button
+                            type="button"
+                            onClick={() => toggleRole(p.id, p.role)}
+                            disabled={updating === p.id}
+                            title="Clique para alternar rapidamente o cargo"
+                            className={`text-[8px] font-black uppercase px-2.5 py-1 tracking-widest border transition-all ${
+                              p.role === 'admin' 
+                                ? 'bg-red-600 text-white border-red-700 hover:bg-red-700' 
+                                : 'bg-blue-600 text-white border-blue-700 hover:bg-blue-700'
+                            }`}
+                          >
+                            {p.role} ⇄
+                          </button>
                         </td>
                         <td className="p-4 text-right">
                           <div className="flex items-center justify-end gap-2">
+                            {/* Edit Button */}
                             <button 
-                              onClick={() => toggleRole(p.id, p.role)}
+                              type="button"
+                              onClick={() => openEditModal(p)}
                               disabled={updating === p.id}
-                              className="px-3 py-1.5 border-2 border-[#141414] text-[9px] font-black uppercase hover:bg-[#141414] hover:text-white transition-all disabled:opacity-50"
+                              className="px-2.5 py-1.5 border-2 border-[#141414] text-[9px] font-black uppercase hover:bg-[#141414] hover:text-white transition-all flex items-center gap-1"
+                              title="Editar Filial e Cargo deste usuário"
                             >
-                              {updating === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Cargo'}
+                              <Edit3 className="w-3 h-3" />
+                              <span className="hidden sm:inline">Editar</span>
                             </button>
+
+                            {/* Delete Button */}
                             <button 
-                              onClick={() => deleteProfile(p.id)}
+                              type="button"
+                              onClick={() => setUserToDelete(p)}
                               disabled={updating === p.id}
-                              className="p-2 text-red-500 hover:bg-red-50 rounded"
+                              className="p-1.5 border-2 border-red-200 text-red-600 hover:bg-red-600 hover:text-white hover:border-red-600 transition-all rounded-xs"
+                              title="Excluir este usuário"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </td>
@@ -465,85 +618,256 @@ ALTER TABLE requests ENABLE ROW LEVEL SECURITY;`}
         </div>
       </div>
 
+      {/* MODAL: EDITAR USUÁRIO */}
+      {userToEdit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="bg-white border-4 border-[#141414] p-6 max-w-md w-full shadow-[12px_12px_0px_0px_rgba(20,20,20,1)] space-y-4">
+            <div className="flex items-center justify-between border-b-2 border-[#141414] pb-3">
+              <div className="flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-[#141414]" />
+                <h3 className="font-black uppercase text-sm tracking-tight">Editar Dados do Usuário</h3>
+              </div>
+              <button 
+                onClick={() => setUserToEdit(null)}
+                className="p-1 hover:bg-[#141414]/10"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div>
+              <p className="text-[10px] font-bold text-[#141414]/50 uppercase">Usuário Selecionado:</p>
+              <p className="font-mono text-sm font-black text-[#141414] truncate">{userToEdit.email}</p>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="space-y-4 pt-2">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-wider text-[#141414]">
+                  Filial de Atuação
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditFilial('04')}
+                    className={`p-3 border-2 border-[#141414] font-mono text-xs font-black uppercase transition-all ${
+                      editFilial === '04' ? 'bg-[#141414] text-white shadow-[2px_2px_0px_0px_rgba(20,20,20,0.3)]' : 'bg-white hover:bg-gray-100'
+                    }`}
+                  >
+                    FILIAL 04
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditFilial('02')}
+                    className={`p-3 border-2 border-[#141414] font-mono text-xs font-black uppercase transition-all ${
+                      editFilial === '02' ? 'bg-amber-500 border-amber-600 text-white shadow-[2px_2px_0px_0px_rgba(245,158,11,0.4)]' : 'bg-white hover:bg-gray-100'
+                    }`}
+                  >
+                    FILIAL 02
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-wider text-[#141414]">
+                  Nível de Permissão (Cargo)
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditRole('vendedor')}
+                    className={`p-3 border-2 border-[#141414] font-mono text-xs font-black uppercase transition-all ${
+                      editRole === 'vendedor' ? 'bg-blue-600 border-blue-700 text-white' : 'bg-white hover:bg-gray-100'
+                    }`}
+                  >
+                    VENDEDOR
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditRole('admin')}
+                    className={`p-3 border-2 border-[#141414] font-mono text-xs font-black uppercase transition-all ${
+                      editRole === 'admin' ? 'bg-red-600 border-red-700 text-white' : 'bg-white hover:bg-gray-100'
+                    }`}
+                  >
+                    ADMIN
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-4 border-t border-[#141414]/10">
+                <button
+                  type="button"
+                  onClick={() => setUserToEdit(null)}
+                  className="flex-1 py-3 border-2 border-[#141414] font-black uppercase text-[10px] tracking-widest hover:bg-gray-100"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingEdit}
+                  className="flex-1 py-3 bg-[#141414] text-white font-black uppercase text-[10px] tracking-widest hover:bg-green-600 border-2 border-[#141414] transition-all flex items-center justify-center gap-2"
+                >
+                  {isSavingEdit && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {isSavingEdit ? 'Salvando...' : 'Salvar Alterações'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CONFIRMAR EXCLUSÃO (100% In-App, sem window.confirm bloqueável) */}
+      {userToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="bg-white border-4 border-red-600 p-6 max-w-md w-full shadow-[12px_12px_0px_0px_rgba(220,38,38,0.3)] space-y-4">
+            <div className="flex items-center gap-3 border-b-2 border-red-600 pb-3">
+              <div className="bg-red-600 p-2 text-white">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-black uppercase text-sm text-red-600 tracking-tight">Confirmar Exclusão de Usuário</h3>
+                <p className="text-[9px] font-bold uppercase text-[#141414]/40">Ação irreversível</p>
+              </div>
+            </div>
+
+            <div className="bg-red-50 p-3 border border-red-200">
+              <p className="text-xs font-mono font-bold text-red-950 break-all">
+                {userToDelete.email}
+              </p>
+              <div className="flex gap-2 mt-2">
+                <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 bg-red-200 text-red-900 uppercase">
+                  Filial {userToDelete.filial || '04'}
+                </span>
+                <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 bg-red-200 text-red-900 uppercase">
+                  {userToDelete.role.toUpperCase()}
+                </span>
+              </div>
+            </div>
+
+            <p className="text-xs text-[#141414]/70 leading-relaxed">
+              Tem certeza que deseja excluir este usuário? Suas permissões de acesso e perfil serão removidos permanentemente.
+            </p>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setUserToDelete(null)}
+                disabled={isDeleting}
+                className="flex-1 py-3 border-2 border-[#141414] font-black uppercase text-[10px] tracking-widest hover:bg-gray-100"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+                className="flex-1 py-3 bg-red-600 text-white font-black uppercase text-[10px] tracking-widest hover:bg-red-700 border-2 border-red-700 transition-all flex items-center justify-center gap-2"
+              >
+                {isDeleting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                {isDeleting ? 'Excluindo...' : 'Sim, Excluir Usuário'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SQL Script Box */}
       <div className="bg-white border-4 border-red-600 p-6 space-y-4 shadow-[10px_10px_0px_0px_rgba(220,38,38,0.2)]">
         <div className="flex items-center gap-3 border-b-2 border-red-600 pb-4">
           <div className="bg-red-600 p-2">
             <Shield className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h4 className="text-sm font-black uppercase tracking-tighter text-red-600">Banco de Dados: Comandos de Reparo</h4>
-            <p className="text-[10px] font-bold uppercase text-red-600/60">Sincronização obrigatória de estrutura</p>
+            <h4 className="text-sm font-black uppercase tracking-tighter text-red-600">Banco de Dados: Comandos de Reparo (Multi-Filial & Estrutura)</h4>
+            <p className="text-[10px] font-bold uppercase text-red-600/60">Sincronização obrigatória de estrutura para Filial 04 e Filial 02</p>
           </div>
         </div>
         
         <p className="text-xs font-bold text-red-800 italic">
-          ⚠️ Se você receber erro de "schema cache" ou "column does not exist", copie o código abaixo e execute no SQL EDITOR do seu painel Supabase:
+          ⚠️ Execute no SQL EDITOR do seu painel Supabase para criar as colunas de filial e isolamento:
         </p>
 
         <div className="bg-[#141414] p-4 font-mono text-[10px] text-green-400 overflow-x-auto border-2 border-red-600">
-          <pre className="whitespace-pre-wrap select-all">
-{`-- 1. ADICIONAR COLUNAS FALTANTES
-ALTER TABLE requests ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1;
-ALTER TABLE requests ADD COLUMN IF NOT EXISTS department TEXT;
+          <pre>{`-- 1. ADICIONAR COLUNAS NAS TABELAS
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS filial TEXT DEFAULT '04';
+ALTER TABLE displays ADD COLUMN IF NOT EXISTS filial TEXT DEFAULT '04';
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS filial TEXT DEFAULT '04';
 ALTER TABLE requests ADD COLUMN IF NOT EXISTS display_code TEXT;
 ALTER TABLE requests ADD COLUMN IF NOT EXISTS display_name TEXT;
 ALTER TABLE requests ADD COLUMN IF NOT EXISTS display_image TEXT;
 ALTER TABLE displays ADD COLUMN IF NOT EXISTS department TEXT DEFAULT 'ELMA CHIPS';
 ALTER TABLE displays ADD COLUMN IF NOT EXISTS min_order_value NUMERIC DEFAULT 0;
 
--- 2. ATUALIZAR DADOS EXISTENTES
+-- 2. TABELA DE INDÚSTRIAS / DEPARTAMENTOS POR FILIAL
+CREATE TABLE IF NOT EXISTS departments (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT NOT NULL,
+  filial TEXT NOT NULL DEFAULT '04',
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 3. MIGRAR DADOS EXISTENTES PARA FILIAL 04 (PADRÃO)
+UPDATE profiles SET filial = '04' WHERE filial IS NULL;
+UPDATE displays SET filial = '04' WHERE filial IS NULL;
+UPDATE requests SET filial = '04' WHERE filial IS NULL;
 UPDATE displays SET department = 'ELMA CHIPS' WHERE department IS NULL;
 
--- 3. CORREÇÃO DE POLÍTICAS (INCLUINDO DANIEL@FRANCAL.COM)
--- Execute este bloco para garantir que todos os admins tenham acesso
+-- 4. INSERIR INDÚSTRIAS BÁSICAS
+INSERT INTO departments (name, filial) VALUES
+  ('ELMA CHIPS', '04'),
+  ('MONDELEZ', '04'),
+  ('FELTRIN', '04'),
+  ('CALÇADOS', '04'),
+  ('AB MAURY', '04'),
+  ('ELMA CHIPS', '02'),
+  ('MONDELEZ', '02'),
+  ('FELTRIN', '02'),
+  ('BEBIDAS', '02'),
+  ('DOCES', '02')
+ON CONFLICT DO NOTHING;
+
+-- 5. POLÍTICAS DE SEGURANÇA E ACESSO
 DO $$ 
 DECLARE 
     pol RECORD;
 BEGIN 
-    FOR pol IN (SELECT policyname, tablename FROM pg_policies WHERE tablename IN ('profiles', 'requests')) 
+    FOR pol IN (SELECT policyname, tablename FROM pg_policies WHERE tablename IN ('profiles', 'requests', 'displays', 'departments')) 
     LOOP EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(pol.policyname) || ' ON ' || quote_ident(pol.tablename); END LOOP;
 END $$;
 
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE displays ENABLE ROW LEVEL SECURITY;
+ALTER TABLE departments ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "adm_master_profiles_v5" ON profiles FOR ALL 
-USING (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'));
+-- Admins têm acesso irrestrito (SELECT, INSERT, UPDATE, DELETE)
+CREATE POLICY "adm_master_profiles_v6" ON profiles FOR ALL 
+USING (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'))
+WITH CHECK (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'));
 
-CREATE POLICY "adm_master_requests_v5" ON requests FOR ALL 
-USING (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'));
+CREATE POLICY "adm_master_requests_v6" ON requests FOR ALL 
+USING (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'))
+WITH CHECK (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'));
 
-CREATE POLICY "vendedor_view_profile" ON profiles FOR SELECT USING (auth.uid() = id);
-CREATE POLICY "vendedor_manage_requests" ON requests FOR ALL USING (auth.uid() = user_id);`}
+CREATE POLICY "adm_master_displays_v6" ON displays FOR ALL 
+USING (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'))
+WITH CHECK (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'));
+
+CREATE POLICY "adm_master_departments_v6" ON departments FOR ALL 
+USING (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'))
+WITH CHECK (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'));
+
+-- Vendedores e usuários: Leitura de displays e departamentos
+CREATE POLICY "user_view_displays" ON displays FOR SELECT USING (true);
+CREATE POLICY "user_view_departments" ON departments FOR SELECT USING (true);
+CREATE POLICY "user_view_profile" ON profiles FOR SELECT USING (auth.uid() = id);
+CREATE POLICY "user_manage_requests" ON requests FOR ALL USING (auth.uid() = user_id);`}
           </pre>
         </div>
         
         <div className="flex items-center gap-3 bg-red-50 p-3 border border-red-200">
           <Info className="w-4 h-4 text-red-600 shrink-0" />
           <p className="text-[10px] font-medium text-red-800 leading-normal">
-            Após rodar no Supabase, atualize esta página. Isso resolverá o erro de "Could not find the column".
-          </p>
-        </div>
-      </div>
-
-      <div className="bg-white border-2 border-dashed border-[#141414]/20 p-6 space-y-4">
-        <div>
-          <h4 className="text-[10px] font-black uppercase tracking-widest mb-2 flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-[#141414]" />
-            Sincronização de Dados
-          </h4>
-          <p className="text-xs font-medium text-[#141414]/50 leading-relaxed">
-            Se algum usuário aparecer sem e-mail, ele ainda não completou o primeiro login. Se o problema persistir após o login, use o SQL Editor do Supabase para vincular os dados manualmente se necessário.
-          </p>
-        </div>
-
-        <div>
-          <h4 className="text-[10px] font-black uppercase tracking-widest mb-2 flex items-center gap-2">
-            <Shield className="w-4 h-4" />
-            Central de Ajuda
-          </h4>
-          <p className="text-xs font-medium text-[#141414]/50 leading-relaxed">
-            A exclusão de um usuário nesta tela remove suas permissões de acesso ao sistema, mas o registro de autenticação permanece no Supabase Auth por segurança.
+            Esse comando ajusta os acessos da Filial 02 e Filial 04 de forma definitiva.
           </p>
         </div>
       </div>

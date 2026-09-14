@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Package, ClipboardList, PackagePlus, LogOut, User, Shield, Users } from 'lucide-react';
+import { Package, ClipboardList, PackagePlus, LogOut, User, Shield, Users, Building2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './lib/supabase';
 import { Profile } from './types';
@@ -57,13 +57,13 @@ export default function App() {
 
       if (fetchError) {
         console.error("Sistema: Erro ao buscar perfil no Supabase:", fetchError.message);
-        // Se houver erro de recursão, assumimos o cargo localmente baseado no e-mail
         if (fetchError.message?.includes('recursion') && isOwnerEmail) {
           console.warn("Sistema: Operando em modo de emergência (Recursão detectada).");
           setProfile({
             id: uid,
             email: currentUserEmail || '',
-            role: 'admin'
+            role: 'admin',
+            filial: '04'
           });
           setInitLoading(false);
           return;
@@ -79,43 +79,47 @@ export default function App() {
           .insert([{ 
             id: uid, 
             email: currentUserEmail || '', 
-            role: role
+            role: role,
+            filial: '04'
           }])
           .select()
           .single();
 
         if (createError) {
           console.warn("Sistema: Falha ao inserir perfil. Motivo:", createError.message);
-          // Se falhou o insert, talvez já exista mas o select falhou. Tentamos upsert como plano C
           const { data: upsertData } = await supabase
             .from('profiles')
-            .upsert({ id: uid, email: currentUserEmail || '', role: role })
+            .upsert({ id: uid, email: currentUserEmail || '', role: role, filial: '04' })
             .select()
             .single();
           
           if (upsertData) {
-            setProfile(upsertData);
+            setProfile({ ...upsertData, filial: upsertData.filial || '04' });
           } else {
             console.log("Sistema: Usando perfil local temporário.");
             setProfile({
               id: uid,
               email: currentUserEmail || '',
-              role: role
+              role: role,
+              filial: '04'
             });
           }
         } else {
           console.log("Sistema: Perfil criado com sucesso.");
-          setProfile(newData);
+          setProfile({ ...newData, filial: newData.filial || '04' });
         }
       } else {
-        console.log("Sistema: Perfil carregado. Role:", existingProfile.role);
+        console.log("Sistema: Perfil carregado. Role:", existingProfile.role, "Filial:", existingProfile.filial);
         if (isOwnerEmail && existingProfile.role !== 'admin') {
           console.log("Sistema: Corrigindo role para ADMIN...");
           const { error: updateError } = await supabase.from('profiles').update({ role: 'admin' }).eq('id', uid);
           if (updateError) console.error("Erro ao atualizar role:", updateError.message);
           existingProfile.role = 'admin';
         }
-        setProfile(existingProfile);
+        setProfile({
+          ...existingProfile,
+          filial: existingProfile.filial || '04'
+        });
       }
     } catch (err: any) {
       console.error("Sistema: Erro na autenticação:", err.message);
@@ -141,32 +145,53 @@ export default function App() {
     return <Login />;
   }
 
+  const currentFilial = profile?.filial || '04';
+
   return (
     <div className="min-h-screen bg-[#E4E3E0] text-[#141414] font-sans selection:bg-[#141414] selection:text-white">
       {/* Header */}
       <header className="border-b border-[#141414] bg-white sticky top-0 z-50">
         <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <div className="bg-[#141414] p-1.5 rounded-sm">
               <Package className="text-white w-5 h-5" />
             </div>
-            <span className="font-black text-xl uppercase tracking-tighter italic">PORTAL_FRANCAL</span>
+            <div>
+              <span className="font-black text-xl uppercase tracking-tighter italic">PORTAL_FRANCAL</span>
+              <div className="flex items-center gap-1 -mt-0.5">
+                <span className="text-[8px] font-mono font-black text-purple-700 uppercase tracking-widest">
+                  FILIAL {currentFilial}
+                </span>
+                <span className="text-[8px] text-[#141414]/40 font-mono">• MULTI-FILIAL</span>
+              </div>
+            </div>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-[#141414]/5 rounded-sm border border-[#141414]/5">
+          <div className="flex items-center gap-3">
+            {/* Filial indicator badge */}
+            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-purple-50 border border-purple-200 text-purple-900 rounded-sm">
+              <Building2 className="w-3.5 h-3.5 text-purple-700" />
+              <span className="text-[10px] font-mono font-black uppercase tracking-wider">
+                FILIAL {currentFilial}
+              </span>
+            </div>
+
+            {/* Profile badge */}
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-[#141414]/5 rounded-sm border border-[#141414]/5">
               {profile?.role === 'admin' ? (
                 <Shield className="w-3 h-3 text-red-600" />
               ) : (
                 <User className="w-3 h-3 text-blue-600" />
               )}
-              <span className="text-[10px] font-black uppercase tracking-widest truncate max-w-[120px]">
+              <span className="text-[10px] font-black uppercase tracking-widest truncate max-w-[130px]">
                 {profile?.role} // {session.user.email?.split('@')[0]}
               </span>
             </div>
+
             <button 
               onClick={handleLogout}
               className="p-2 hover:bg-red-50 hover:text-red-600 transition-colors rounded-sm group"
+              title="Sair da Conta"
             >
               <LogOut className="w-5 h-5 group-hover:scale-110 transition-transform" />
             </button>
@@ -231,7 +256,11 @@ export default function App() {
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.2 }}
             >
-              <RequestForm onSuccess={() => setActiveTab('solicitados')} />
+              <RequestForm 
+                onSuccess={() => setActiveTab('solicitados')} 
+                userFilial={currentFilial}
+                isAdmin={profile?.role === 'admin'}
+              />
             </motion.div>
           ) : activeTab === 'solicitados' ? (
             <motion.div
@@ -241,7 +270,10 @@ export default function App() {
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.2 }}
             >
-              <RequestList isAdmin={profile?.role === 'admin'} />
+              <RequestList 
+                isAdmin={profile?.role === 'admin'} 
+                userFilial={currentFilial}
+              />
             </motion.div>
           ) : activeTab === 'catalogo' ? (
             <motion.div
@@ -251,7 +283,9 @@ export default function App() {
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.2 }}
             >
-              <DisplayManager />
+              <DisplayManager 
+                initialFilial={currentFilial} 
+              />
             </motion.div>
           ) : (
             <motion.div
@@ -269,7 +303,7 @@ export default function App() {
 
       {/* Footer / Info */}
       <footer className="fixed bottom-0 left-0 right-0 border-t border-[#141414] bg-white p-3 text-[10px] uppercase font-bold tracking-[0.2em] text-center text-[#141414]/40 z-40">
-        SUPABASE_DRIVEN // PDV_OPERATIONAL_SYSTEM // 2026
+        SUPABASE_DRIVEN // PDV_OPERATIONAL_SYSTEM // FILIAL 04 & FILIAL 02
       </footer>
     </div>
   );

@@ -1,24 +1,53 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Search, Filter, Loader2, PackageX, User, X, Clock, CheckCircle2, ThumbsUp, XCircle, Layers } from 'lucide-react';
+import { Search, Filter, Loader2, PackageX, User, X, Clock, CheckCircle2, ThumbsUp, XCircle, Layers, Building2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { DisplayRequest, DEPARTMENTS, RequestStatus } from '../types';
+import { DisplayRequest, DEFAULT_DEPARTMENTS, RequestStatus } from '../types';
 import RequestCard from './RequestCard';
+import { getDepartmentsForFilial } from '../lib/departments';
 
 interface RequestListProps {
   isAdmin?: boolean;
+  userFilial?: string;
 }
 
 type StatusFilterType = 'TODOS' | RequestStatus;
 
-export default function RequestList({ isAdmin }: RequestListProps) {
+export default function RequestList({ isAdmin, userFilial = '04' }: RequestListProps) {
   const [requests, setRequests] = useState<DisplayRequest[]>([]);
-  const [profilesList, setProfilesList] = useState<{ id: string; email: string; role?: string }[]>([]);
+  const [profilesList, setProfilesList] = useState<{ id: string; email: string; role?: string; filial?: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Filial filter: Admin can choose 'TODAS', '04', '02'. Non-admin is locked to userFilial.
+  const [filialFilter, setFilialFilter] = useState<string>(isAdmin ? 'TODAS' : (userFilial || '04'));
   const [filter, setFilter] = useState<string>('');
   const [deptFilter, setDeptFilter] = useState<string>('TODOS');
   const [sellerFilter, setSellerFilter] = useState<string>('TODOS');
   const [statusFilter, setStatusFilter] = useState<StatusFilterType>('TODOS');
+  const [availableDepartments, setAvailableDepartments] = useState<string[]>([]);
+
+  // Update filial filter if userFilial changes and not admin
+  useEffect(() => {
+    if (!isAdmin && userFilial) {
+      setFilialFilter(userFilial);
+    }
+  }, [isAdmin, userFilial]);
+
+  // Dynamically load departments for current filial filter
+  useEffect(() => {
+    async function loadDepts() {
+      if (filialFilter === 'TODAS') {
+        const d04 = await getDepartmentsForFilial('04');
+        const d02 = await getDepartmentsForFilial('02');
+        const combined = Array.from(new Set([...d04, ...d02]));
+        setAvailableDepartments(combined);
+      } else {
+        const d = await getDepartmentsForFilial(filialFilter);
+        setAvailableDepartments(d);
+      }
+    }
+    loadDepts();
+  }, [filialFilter]);
 
   async function fetchRequests(isInitial = false) {
     try {
@@ -28,20 +57,20 @@ export default function RequestList({ isAdmin }: RequestListProps) {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      // Se for admin, busca também lista de perfis para garantir listagem completa de vendedores
+      // Se for admin, busca lista de perfis para garantir dados de vendedores e filiais
       if (isAdmin) {
         try {
-          const { data: profs } = await supabase.from('profiles').select('id, email, role');
+          const { data: profs } = await supabase.from('profiles').select('id, email, role, filial');
           if (profs) setProfilesList(profs);
         } catch (e) {
           console.warn("Não foi possível buscar a lista de perfis:", e);
         }
       }
 
-      // Consulta simplificada e resiliente
+      // Consulta de solicitações
       const { data, error: fetchErr } = await supabase
         .from('requests')
-        .select('*, displays(name, code, image_url, department), profiles(email)')
+        .select('*, displays(name, code, image_url, department), profiles(email, filial)')
         .order('created_at', { ascending: false });
 
       if (fetchErr) {
@@ -50,6 +79,7 @@ export default function RequestList({ isAdmin }: RequestListProps) {
       
       const formatted = (data || []).map(r => ({
         ...r,
+        filial: r.filial || (r as any).profiles?.filial || '04',
         display_name: r.display_name || (r as any).displays?.name || 'Expositor Removido',
         display_code: r.display_code || (r as any).displays?.code || '---',
         display_image: r.display_image || (r as any).displays?.image_url,
@@ -57,12 +87,14 @@ export default function RequestList({ isAdmin }: RequestListProps) {
         user_email: (r as any).profiles?.email || 'Vendedor'
       }));
       
-      // Se não for admin, filtra localmente para garantir segurança se o RLS falhar
-      const finalData = isAdmin ? formatted : formatted.filter(r => r.user_id === session.user.id);
+      // Se não for admin, isolamento estrito: só vê solicitações da sua filial e/ou feitas por ele
+      const finalData = isAdmin 
+        ? formatted 
+        : formatted.filter(r => (r.filial || '04') === (userFilial || '04') || r.user_id === session.user.id);
+
       setRequests(finalData as DisplayRequest[]);
     } catch (err: any) {
       console.error("Error fetching requests:", err);
-      // Fallback final
       try {
         const { data: fallbackData } = await supabase
           .from('requests')
@@ -71,6 +103,7 @@ export default function RequestList({ isAdmin }: RequestListProps) {
         
         const formatted = (fallbackData || []).map(r => ({
           ...r,
+          filial: r.filial || '04',
           display_name: 'Carregando...',
           display_code: '---',
           user_email: 'Sincronizando...'
@@ -87,15 +120,13 @@ export default function RequestList({ isAdmin }: RequestListProps) {
   useEffect(() => {
     fetchRequests(true);
 
-    // Inscrição em tempo real para atualizações automáticas
     const channel = supabase
       .channel('requests_realtime')
       .on('postgres_changes', { 
         event: '*', 
         schema: 'public', 
         table: 'requests' 
-      }, (payload) => {
-        console.log("Realtime Change:", payload);
+      }, () => {
         fetchRequests(false);
       })
       .subscribe();
@@ -103,25 +134,24 @@ export default function RequestList({ isAdmin }: RequestListProps) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [isAdmin]);
+  }, [isAdmin, userFilial]);
 
   // Lista agregada de vendedores para o filtro
   const sellersList = useMemo(() => {
-    const sellersMap = new Map<string, { email: string; count: number; userId?: string }>();
+    const sellersMap = new Map<string, { email: string; count: number; userId?: string; filial?: string }>();
 
-    // Inicializa com perfis conhecidos
     profilesList.forEach(p => {
       if (p.email) {
         const key = p.email.toLowerCase();
         sellersMap.set(key, {
           email: p.email,
           count: 0,
-          userId: p.id
+          userId: p.id,
+          filial: p.filial || '04'
         });
       }
     });
 
-    // Contabiliza solicitações por vendedor
     requests.forEach(r => {
       if (r.user_email && r.user_email !== 'Vendedor' && r.user_email !== 'Sincronizando...') {
         const key = r.user_email.toLowerCase();
@@ -132,7 +162,8 @@ export default function RequestList({ isAdmin }: RequestListProps) {
           sellersMap.set(key, {
             email: r.user_email,
             count: 1,
-            userId: r.user_id
+            userId: r.user_id,
+            filial: r.filial || '04'
           });
         }
       }
@@ -141,10 +172,10 @@ export default function RequestList({ isAdmin }: RequestListProps) {
     return Array.from(sellersMap.values()).sort((a, b) => a.email.localeCompare(b.email));
   }, [profilesList, requests]);
 
-  // Contadores de status (baseados no filtro de vendedor/departamento/texto se aplicável ou no total)
+  // Contadores de status baseados nas solicitações visíveis
   const statusCounts = useMemo(() => {
     const counts = {
-      TODOS: requests.length,
+      TODOS: 0,
       pending: 0,
       approved: 0,
       delivered: 0,
@@ -152,15 +183,24 @@ export default function RequestList({ isAdmin }: RequestListProps) {
     };
 
     requests.forEach(r => {
-      if (r.status && counts[r.status] !== undefined) {
-        counts[r.status]++;
+      const matchesBranch = filialFilter === 'TODAS' || (r.filial || '04') === filialFilter;
+      if (matchesBranch) {
+        counts.TODOS++;
+        if (r.status && counts[r.status] !== undefined) {
+          counts[r.status]++;
+        }
       }
     });
 
     return counts;
-  }, [requests]);
+  }, [requests, filialFilter]);
 
   const filteredRequests = requests.filter(r => {
+    // Filial filter
+    const currentFilial = r.filial || '04';
+    const matchesFilial = filialFilter === 'TODAS' || currentFilial === filialFilter;
+
+    // Search term
     const matchesSearch = 
       r.display_name?.toLowerCase().includes(filter.toLowerCase()) ||
       r.order_number.toLowerCase().includes(filter.toLowerCase()) ||
@@ -168,20 +208,24 @@ export default function RequestList({ isAdmin }: RequestListProps) {
       r.customer_name.toLowerCase().includes(filter.toLowerCase()) ||
       r.user_email?.toLowerCase().includes(filter.toLowerCase());
     
+    // Department
     const matchesDept = deptFilter === 'TODOS' || r.department === deptFilter;
 
+    // Seller
     const matchesSeller = 
       !isAdmin || 
       sellerFilter === 'TODOS' || 
       r.user_email?.toLowerCase() === sellerFilter.toLowerCase() ||
       (profilesList.find(p => p.email.toLowerCase() === sellerFilter.toLowerCase())?.id === r.user_id);
     
+    // Status
     const matchesStatus = statusFilter === 'TODOS' || r.status === statusFilter;
 
-    return matchesSearch && matchesDept && matchesSeller && matchesStatus;
+    return matchesFilial && matchesSearch && matchesDept && matchesSeller && matchesStatus;
   });
 
   const hasActiveFilters = 
+    filialFilter !== (isAdmin ? 'TODAS' : userFilial) ||
     deptFilter !== 'TODOS' || 
     (isAdmin && sellerFilter !== 'TODOS') || 
     statusFilter !== 'TODOS' || 
@@ -201,7 +245,7 @@ export default function RequestList({ isAdmin }: RequestListProps) {
     return (
       <div className="flex flex-col items-center justify-center p-12 text-[#141414]/40">
         <Loader2 className="w-8 h-8 animate-spin mb-4 text-[#141414]" />
-        <p className="font-mono text-xs uppercase tracking-widest font-black">Sincronizando Banco...</p>
+        <p className="font-mono text-xs uppercase tracking-widest font-black">Sincronizando Solicitações...</p>
       </div>
     );
   }
@@ -322,8 +366,44 @@ export default function RequestList({ isAdmin }: RequestListProps) {
         </button>
       </div>
 
-      {/* Filters */}
+      {/* Filters Box */}
       <div className="bg-white border-2 border-[#141414] p-4 flex flex-col gap-3 shadow-[4px_4px_0px_0px_rgba(20,20,20,1)]">
+        {/* Filial Quick Switcher for Admins */}
+        {isAdmin && (
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#141414]/10">
+            <div className="flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-[#141414]" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-[#141414]">Visualizar Filial:</span>
+            </div>
+            <div className="flex items-center gap-1 border-2 border-[#141414] p-1 bg-white">
+              <button
+                onClick={() => setFilialFilter('TODAS')}
+                className={`px-3 py-1 font-mono text-[9px] font-black uppercase transition-all ${
+                  filialFilter === 'TODAS' ? 'bg-[#141414] text-white' : 'hover:bg-[#141414]/5'
+                }`}
+              >
+                TODAS AS FILIAIS
+              </button>
+              <button
+                onClick={() => setFilialFilter('04')}
+                className={`px-3 py-1 font-mono text-[9px] font-black uppercase transition-all ${
+                  filialFilter === '04' ? 'bg-[#141414] text-white' : 'hover:bg-[#141414]/5'
+                }`}
+              >
+                FILIAL 04
+              </button>
+              <button
+                onClick={() => setFilialFilter('02')}
+                className={`px-3 py-1 font-mono text-[9px] font-black uppercase transition-all ${
+                  filialFilter === '02' ? 'bg-[#141414] text-white' : 'hover:bg-[#141414]/5'
+                }`}
+              >
+                FILIAL 02
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center">
           <div className="relative flex-1 w-full">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#141414]/40" />
@@ -355,7 +435,7 @@ export default function RequestList({ isAdmin }: RequestListProps) {
                 onChange={(e) => setStatusFilter(e.target.value as StatusFilterType)}
                 className="bg-transparent font-black uppercase text-[10px] outline-none cursor-pointer w-full"
               >
-                <option value="TODOS">STATUS: TODOS ({requests.length})</option>
+                <option value="TODOS">STATUS: TODOS ({statusCounts.TODOS})</option>
                 <option value="pending">PENDENTES ({statusCounts.pending})</option>
                 <option value="approved">APROVADOS ({statusCounts.approved})</option>
                 <option value="delivered">CONCLUÍDOS ({statusCounts.delivered})</option>
@@ -371,8 +451,8 @@ export default function RequestList({ isAdmin }: RequestListProps) {
                 onChange={(e) => setDeptFilter(e.target.value)}
                 className="bg-transparent font-black uppercase text-[10px] outline-none cursor-pointer w-full"
               >
-                <option value="TODOS">TODOS DEPTS</option>
-                {DEPARTMENTS.map(dept => (
+                <option value="TODOS">TODAS INDÚSTRIAS</option>
+                {availableDepartments.map(dept => (
                   <option key={dept} value={dept}>{dept}</option>
                 ))}
               </select>
@@ -392,7 +472,7 @@ export default function RequestList({ isAdmin }: RequestListProps) {
                   <option value="TODOS">TODOS VENDEDORES ({requests.length})</option>
                   {sellersList.map(seller => (
                     <option key={seller.email} value={seller.email}>
-                      {seller.email} ({seller.count})
+                      {seller.email} (F{seller.filial || '04'} - {seller.count})
                     </option>
                   ))}
                 </select>
@@ -417,10 +497,18 @@ export default function RequestList({ isAdmin }: RequestListProps) {
           </div>
         </div>
 
-        {/* Active Filter Chips indicator */}
+        {/* Active Filter Chips */}
         {hasActiveFilters && (
           <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[#141414]/10 text-[10px] font-mono">
             <span className="font-bold text-[#141414]/50 uppercase">Filtros ativos:</span>
+            {isAdmin && filialFilter !== 'TODAS' && (
+              <span className="inline-flex items-center gap-1 bg-purple-100 text-purple-900 border border-purple-300 px-2 py-0.5 font-bold uppercase rounded-xs">
+                Filial: {filialFilter}
+                <button onClick={() => setFilialFilter('TODAS')} className="hover:text-red-600 ml-0.5">
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
             {statusFilter !== 'TODOS' && (
               <span className={`inline-flex items-center gap-1 px-2 py-0.5 font-bold uppercase rounded-xs border ${
                 statusFilter === 'pending' ? 'bg-amber-100 text-amber-900 border-amber-300' :
@@ -436,7 +524,7 @@ export default function RequestList({ isAdmin }: RequestListProps) {
             )}
             {deptFilter !== 'TODOS' && (
               <span className="inline-flex items-center gap-1 bg-[#141414]/10 px-2 py-0.5 font-bold uppercase rounded-xs">
-                Depto: {deptFilter}
+                Indústria: {deptFilter}
                 <button onClick={() => setDeptFilter('TODOS')} className="hover:text-red-600">
                   <X className="w-3 h-3" />
                 </button>
@@ -461,6 +549,7 @@ export default function RequestList({ isAdmin }: RequestListProps) {
             )}
             <button
               onClick={() => {
+                if (isAdmin) setFilialFilter('TODAS');
                 setStatusFilter('TODOS');
                 setDeptFilter('TODOS');
                 setSellerFilter('TODOS');
@@ -474,15 +563,18 @@ export default function RequestList({ isAdmin }: RequestListProps) {
         )}
       </div>
 
-      {/* List */}
+      {/* List Cards */}
       <div className="grid grid-cols-1 gap-6">
         {filteredRequests.length === 0 ? (
           <div className="bg-white border-2 border-dashed border-[#141414]/20 p-16 flex flex-col items-center text-center">
             <PackageX className="w-12 h-12 text-[#141414]/20 mb-4" />
-            <h3 className="font-black text-xs text-[#141414]/40 uppercase tracking-[0.2em]">Sem resultados para esta busca</h3>
+            <h3 className="font-black text-xs text-[#141414]/40 uppercase tracking-[0.2em]">
+              Nenhuma solicitação encontrada {!isAdmin ? `para a Filial ${userFilial || '04'}` : ''}
+            </h3>
             {hasActiveFilters && (
               <button
                 onClick={() => {
+                  if (isAdmin) setFilialFilter('TODAS');
                   setStatusFilter('TODOS');
                   setDeptFilter('TODOS');
                   setSellerFilter('TODOS');
@@ -508,4 +600,3 @@ export default function RequestList({ isAdmin }: RequestListProps) {
     </div>
   );
 }
-
