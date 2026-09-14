@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Package, ClipboardList, PackagePlus, LogOut, User, Shield, Users, Building2 } from 'lucide-react';
+import { Package, ClipboardList, PackagePlus, LogOut, User, Shield, Users, Building2, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './lib/supabase';
 import { Profile } from './types';
@@ -21,6 +21,7 @@ export default function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('solicitar');
   const [initLoading, setInitLoading] = useState(true);
+  const [adminSelectedFilial, setAdminSelectedFilial] = useState<string | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -41,24 +42,79 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Real-time listener for current user's profile updates
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    const channel = supabase
+      .channel(`profile-${session.user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${session.user.id}`
+        },
+        (payload: any) => {
+          if (payload.new) {
+            console.log("Sistema: Perfil atualizado em tempo real:", payload.new);
+            setProfile(prev => ({
+              ...(prev || {}),
+              ...payload.new,
+              filial: payload.new.filial || '04'
+            }));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [session?.user?.id]);
+
   async function fetchProfile(uid: string, email?: string) {
     try {
       const currentUserEmail = email || session?.user?.email;
-      const isOwnerEmail = currentUserEmail === 'admin@gmail.com' || currentUserEmail === 'gabrielicloudgb@gmail.com' || currentUserEmail === 'daniel@francal.com';
+      const isOwnerEmail = 
+        currentUserEmail === 'admin@gmail.com' || 
+        currentUserEmail === 'gabrielicloudgb@gmail.com' || 
+        currentUserEmail === 'daniel@francal.com';
 
       console.log("Sistema: Verificando perfil para:", currentUserEmail);
-      console.log("Sistema: É Administrador?", isOwnerEmail);
 
-      const { data: existingProfile, error: fetchError } = await supabase
+      // 1. Busca perfil pelo id de autenticação
+      let { data: currentProfile, error: fetchError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', uid)
         .maybeSingle(); 
 
-      if (fetchError) {
+      // 2. Se não encontrou pelo UID mas temos o e-mail, busca pelo e-mail
+      if (!currentProfile && currentUserEmail) {
+        const { data: profileByEmail } = await supabase
+          .from('profiles')
+          .select('*')
+          .ilike('email', currentUserEmail.trim())
+          .maybeSingle();
+
+        if (profileByEmail) {
+          console.log("Sistema: Perfil vinculado encontrado pelo e-mail:", profileByEmail);
+          currentProfile = profileByEmail;
+          // Vincula o ID atual de autenticação no perfil
+          try {
+            await supabase
+              .from('profiles')
+              .update({ id: uid })
+              .eq('email', profileByEmail.email);
+          } catch {}
+        }
+      }
+
+      if (fetchError && !currentProfile) {
         console.error("Sistema: Erro ao buscar perfil no Supabase:", fetchError.message);
-        if (fetchError.message?.includes('recursion') && isOwnerEmail) {
-          console.warn("Sistema: Operando em modo de emergência (Recursão detectada).");
+        if (isOwnerEmail) {
           setProfile({
             id: uid,
             email: currentUserEmail || '',
@@ -70,56 +126,48 @@ export default function App() {
         }
       }
 
-      const role = isOwnerEmail ? 'admin' : 'vendedor';
+      const defaultRole = isOwnerEmail ? 'admin' : 'vendedor';
 
-      if (!existingProfile) {
-        console.log("Sistema: Perfil não encontrado, tentando persistir...");
-        const { data: newData, error: createError } = await supabase
+      if (!currentProfile) {
+        console.log("Sistema: Perfil não existente, criando padrão...");
+        const { data: createdProfile, error: createError } = await supabase
           .from('profiles')
           .insert([{ 
             id: uid, 
             email: currentUserEmail || '', 
-            role: role,
+            role: defaultRole,
             filial: '04'
           }])
           .select()
           .single();
 
         if (createError) {
-          console.warn("Sistema: Falha ao inserir perfil. Motivo:", createError.message);
-          const { data: upsertData } = await supabase
-            .from('profiles')
-            .upsert({ id: uid, email: currentUserEmail || '', role: role, filial: '04' })
-            .select()
-            .single();
-          
-          if (upsertData) {
-            setProfile({ ...upsertData, filial: upsertData.filial || '04' });
-          } else {
-            console.log("Sistema: Usando perfil local temporário.");
-            setProfile({
-              id: uid,
-              email: currentUserEmail || '',
-              role: role,
-              filial: '04'
-            });
-          }
+          console.warn("Sistema: Falha ao inserir perfil inicial:", createError.message);
+          setProfile({
+            id: uid,
+            email: currentUserEmail || '',
+            role: defaultRole,
+            filial: '04'
+          });
         } else {
-          console.log("Sistema: Perfil criado com sucesso.");
-          setProfile({ ...newData, filial: newData.filial || '04' });
+          setProfile({ ...createdProfile, filial: createdProfile.filial || '04' });
         }
       } else {
-        console.log("Sistema: Perfil carregado. Role:", existingProfile.role, "Filial:", existingProfile.filial);
-        if (isOwnerEmail && existingProfile.role !== 'admin') {
-          console.log("Sistema: Corrigindo role para ADMIN...");
-          const { error: updateError } = await supabase.from('profiles').update({ role: 'admin' }).eq('id', uid);
-          if (updateError) console.error("Erro ao atualizar role:", updateError.message);
-          existingProfile.role = 'admin';
+        console.log("Sistema: Perfil carregado com sucesso. Cargo:", currentProfile.role, "Filial:", currentProfile.filial);
+        if (isOwnerEmail && currentProfile.role !== 'admin') {
+          console.log("Sistema: Promovendo proprietário para ADMIN...");
+          await supabase.from('profiles').update({ role: 'admin' }).eq('id', uid);
+          currentProfile.role = 'admin';
         }
+        
         setProfile({
-          ...existingProfile,
-          filial: existingProfile.filial || '04'
+          ...currentProfile,
+          filial: currentProfile.filial || '04'
         });
+
+        if (!adminSelectedFilial) {
+          setAdminSelectedFilial(currentProfile.filial || '04');
+        }
       }
     } catch (err: any) {
       console.error("Sistema: Erro na autenticação:", err.message);
@@ -145,7 +193,10 @@ export default function App() {
     return <Login />;
   }
 
-  const currentFilial = profile?.filial || '04';
+  // Active filial: Admins can toggle between 04 and 02 in header; sellers are locked to their profile
+  const userRole = profile?.role || 'vendedor';
+  const isAdmin = userRole === 'admin';
+  const activeFilial = isAdmin ? (adminSelectedFilial || profile?.filial || '04') : (profile?.filial || '04');
 
   return (
     <div className="min-h-screen bg-[#E4E3E0] text-[#141414] font-sans selection:bg-[#141414] selection:text-white">
@@ -160,7 +211,7 @@ export default function App() {
               <span className="font-black text-xl uppercase tracking-tighter italic">PORTAL_FRANCAL</span>
               <div className="flex items-center gap-1 -mt-0.5">
                 <span className="text-[8px] font-mono font-black text-purple-700 uppercase tracking-widest">
-                  FILIAL {currentFilial}
+                  FILIAL {activeFilial}
                 </span>
                 <span className="text-[8px] text-[#141414]/40 font-mono">• MULTI-FILIAL</span>
               </div>
@@ -168,24 +219,56 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Filial indicator badge */}
-            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-purple-50 border border-purple-200 text-purple-900 rounded-sm">
-              <Building2 className="w-3.5 h-3.5 text-purple-700" />
-              <span className="text-[10px] font-mono font-black uppercase tracking-wider">
-                FILIAL {currentFilial}
-              </span>
-            </div>
+            {/* Filial Switcher for Admins */}
+            {isAdmin ? (
+              <div className="flex items-center bg-gray-100 p-1 border border-[#141414] rounded-sm">
+                <span className="text-[8px] font-mono font-black uppercase text-[#141414]/50 px-1.5 hidden md:inline">
+                  FILIAL ATIVA:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setAdminSelectedFilial('04')}
+                  className={`px-2.5 py-1 text-[9px] font-mono font-black uppercase transition-all ${
+                    activeFilial === '04' ? 'bg-[#141414] text-white shadow-sm' : 'text-[#141414] hover:bg-gray-200'
+                  }`}
+                >
+                  Filial 04
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAdminSelectedFilial('02')}
+                  className={`px-2.5 py-1 text-[9px] font-mono font-black uppercase transition-all ${
+                    activeFilial === '02' ? 'bg-[#141414] text-white shadow-sm' : 'text-[#141414] hover:bg-gray-200'
+                  }`}
+                >
+                  Filial 02
+                </button>
+              </div>
+            ) : (
+              /* Locked Filial badge for Seller */
+              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-purple-50 border border-purple-200 text-purple-900 rounded-sm">
+                <Building2 className="w-3.5 h-3.5 text-purple-700" />
+                <span className="text-[10px] font-mono font-black uppercase tracking-wider">
+                  FILIAL {activeFilial}
+                </span>
+              </div>
+            )}
 
             {/* Profile badge */}
             <div className="flex items-center gap-2 px-3 py-1.5 bg-[#141414]/5 rounded-sm border border-[#141414]/5">
-              {profile?.role === 'admin' ? (
-                <Shield className="w-3 h-3 text-red-600" />
+              {isAdmin ? (
+                <Shield className="w-3.5 h-3.5 text-red-600" />
               ) : (
-                <User className="w-3 h-3 text-blue-600" />
+                <User className="w-3.5 h-3.5 text-blue-600" />
               )}
-              <span className="text-[10px] font-black uppercase tracking-widest truncate max-w-[130px]">
-                {profile?.role} // {session.user.email?.split('@')[0]}
-              </span>
+              <div className="flex flex-col text-left">
+                <span className="text-[9px] font-black uppercase tracking-wider leading-tight">
+                  {profile?.role?.toUpperCase() || 'USUÁRIO'}
+                </span>
+                <span className="text-[8px] font-mono font-bold text-[#141414]/50 truncate max-w-[110px] leading-tight">
+                  {session.user.email?.split('@')[0]}
+                </span>
+              </div>
             </div>
 
             <button 
@@ -204,7 +287,7 @@ export default function App() {
         <div className="max-w-5xl mx-auto flex">
           <button
             onClick={() => setActiveTab('solicitar')}
-            className={`flex-1 flex items-center justify-center gap-2 py-5 font-black uppercase text-[10px] border-r border-[#141414] transition-all ${
+            className={`flex-1 flex items-center justify-center gap-2 py-4 font-black uppercase text-[10px] border-r border-[#141414] transition-all ${
               activeTab === 'solicitar' ? 'bg-[#141414] text-white' : 'hover:bg-[#141414]/5'
             }`}
           >
@@ -213,18 +296,18 @@ export default function App() {
           </button>
           <button
             onClick={() => setActiveTab('solicitados')}
-            className={`flex-1 flex items-center justify-center gap-2 py-5 font-black uppercase text-[10px] border-r border-[#141414] transition-all ${
+            className={`flex-1 flex items-center justify-center gap-2 py-4 font-black uppercase text-[10px] border-r border-[#141414] transition-all ${
               activeTab === 'solicitados' ? 'bg-[#141414] text-white' : 'hover:bg-[#141414]/5'
             }`}
           >
             <ClipboardList className="w-4 h-4" />
             Solicitados
           </button>
-          {profile?.role === 'admin' && (
+          {isAdmin && (
             <>
               <button
                 onClick={() => setActiveTab('catalogo')}
-                className={`flex-1 flex items-center justify-center gap-2 py-5 font-black uppercase text-[10px] border-r border-[#141414] transition-all ${
+                className={`flex-1 flex items-center justify-center gap-2 py-4 font-black uppercase text-[10px] border-r border-[#141414] transition-all ${
                   activeTab === 'catalogo' ? 'bg-[#141414] text-white' : 'hover:bg-[#141414]/5'
                 }`}
               >
@@ -233,7 +316,7 @@ export default function App() {
               </button>
               <button
                 onClick={() => setActiveTab('usuarios')}
-                className={`flex-1 flex items-center justify-center gap-2 py-5 font-black uppercase text-[10px] transition-all ${
+                className={`flex-1 flex items-center justify-center gap-2 py-4 font-black uppercase text-[10px] transition-all ${
                   activeTab === 'usuarios' ? 'bg-[#141414] text-white' : 'hover:bg-[#141414]/5'
                 }`}
               >
@@ -250,7 +333,7 @@ export default function App() {
         <AnimatePresence mode="wait">
           {activeTab === 'solicitar' ? (
             <motion.div
-              key="form"
+              key={`form-${activeFilial}`}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
@@ -258,33 +341,33 @@ export default function App() {
             >
               <RequestForm 
                 onSuccess={() => setActiveTab('solicitados')} 
-                userFilial={currentFilial}
-                isAdmin={profile?.role === 'admin'}
+                userFilial={activeFilial}
+                isAdmin={isAdmin}
               />
             </motion.div>
           ) : activeTab === 'solicitados' ? (
             <motion.div
-              key="list"
+              key={`list-${activeFilial}`}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.2 }}
             >
               <RequestList 
-                isAdmin={profile?.role === 'admin'} 
-                userFilial={currentFilial}
+                isAdmin={isAdmin} 
+                userFilial={activeFilial}
               />
             </motion.div>
           ) : activeTab === 'catalogo' ? (
             <motion.div
-              key="catalogo"
+              key={`catalogo-${activeFilial}`}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.2 }}
             >
               <DisplayManager 
-                initialFilial={currentFilial} 
+                initialFilial={activeFilial} 
               />
             </motion.div>
           ) : (
@@ -303,7 +386,7 @@ export default function App() {
 
       {/* Footer / Info */}
       <footer className="fixed bottom-0 left-0 right-0 border-t border-[#141414] bg-white p-3 text-[10px] uppercase font-bold tracking-[0.2em] text-center text-[#141414]/40 z-40">
-        SUPABASE_DRIVEN // PDV_OPERATIONAL_SYSTEM // FILIAL 04 & FILIAL 02
+        FRANCAL DISTRIBUIDORA // FILIAL 04 (MATRIZ) & FILIAL 02 // GESTÃO DE EXPOSITORES
       </footer>
     </div>
   );

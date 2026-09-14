@@ -2,10 +2,27 @@ import { supabase } from './supabase';
 import { DEFAULT_DEPARTMENTS } from '../types';
 
 const LOCAL_STORAGE_KEY = 'francal_custom_departments';
+const DELETED_STORAGE_KEY = 'francal_deleted_departments';
+
+function getDeletedDepartments(filial: string): string[] {
+  try {
+    const saved = localStorage.getItem(`${DELETED_STORAGE_KEY}_${filial}`);
+    return saved ? JSON.parse(saved).map((s: string) => s.toUpperCase().trim()) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveDeletedDepartments(filial: string, list: string[]): void {
+  try {
+    localStorage.setItem(`${DELETED_STORAGE_KEY}_${filial}`, JSON.stringify(list));
+  } catch {}
+}
 
 export async function getDepartmentsForFilial(filial: string): Promise<string[]> {
   const normFilial = filial || '04';
   const baseDefaults = DEFAULT_DEPARTMENTS[normFilial] || DEFAULT_DEPARTMENTS['04'] || [];
+  const deletedSet = new Set(getDeletedDepartments(normFilial));
 
   let dbDepartments: string[] = [];
   try {
@@ -31,25 +48,13 @@ export async function getDepartmentsForFilial(filial: string): Promise<string[]>
     }
   } catch {}
 
-  // Também podemos coletar departamentos já usados em displays dessa filial
-  let displayDepts: string[] = [];
-  try {
-    const { data } = await supabase
-      .from('displays')
-      .select('department, filial');
-    
-    if (data) {
-      displayDepts = data
-        .filter((d: any) => (d.filial || '04') === normFilial && d.department)
-        .map((d: any) => String(d.department).toUpperCase().trim());
-    }
-  } catch {}
-
-  const combined = Array.from(new Set([...baseDefaults, ...dbDepartments, ...localCustom, ...displayDepts]))
+  // Combina todas as fontes
+  const combined = Array.from(new Set([...baseDefaults, ...dbDepartments, ...localCustom]))
     .filter(Boolean)
+    .filter(name => !deletedSet.has(name)) // Não inclui indústrias explicitamente removidas
     .sort((a, b) => a.localeCompare(b));
 
-  return combined.length > 0 ? combined : baseDefaults;
+  return combined;
 }
 
 export async function saveDepartmentForFilial(name: string, filial: string): Promise<string[]> {
@@ -57,7 +62,13 @@ export async function saveDepartmentForFilial(name: string, filial: string): Pro
   const cleanName = name.toUpperCase().trim();
   if (!cleanName) return getDepartmentsForFilial(normFilial);
 
-  // Tentativa de gravar no Supabase
+  // Se estava na lista de excluídos, remove da lista de excluídos
+  const deleted = getDeletedDepartments(normFilial);
+  if (deleted.includes(cleanName)) {
+    saveDeletedDepartments(normFilial, deleted.filter(d => d !== cleanName));
+  }
+
+  // Grava no Supabase
   try {
     await supabase
       .from('departments')
@@ -84,14 +95,25 @@ export async function removeDepartmentForFilial(name: string, filial: string): P
   const normFilial = filial || '04';
   const cleanName = name.toUpperCase().trim();
 
+  // 1. Marca como excluído para que não volte a ser injetado por baseDefaults
+  const deleted = getDeletedDepartments(normFilial);
+  if (!deleted.includes(cleanName)) {
+    deleted.push(cleanName);
+    saveDeletedDepartments(normFilial, deleted);
+  }
+
+  // 2. Remove do Supabase
   try {
     await supabase
       .from('departments')
       .delete()
       .eq('filial', normFilial)
       .eq('name', cleanName);
-  } catch {}
+  } catch (err) {
+    console.warn("Aviso ao excluir departamento no banco:", err);
+  }
 
+  // 3. Remove do localStorage
   try {
     const key = `${LOCAL_STORAGE_KEY}_${normFilial}`;
     const saved = localStorage.getItem(key);

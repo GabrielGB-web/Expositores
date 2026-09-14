@@ -59,8 +59,10 @@ const UserManagement: React.FC = () => {
         auth: { persistSession: false } 
       });
 
+      const cleanEmail = newEmail.trim().toLowerCase();
+
       const { data, error } = await tempClient.auth.signUp({
-        email: newEmail,
+        email: cleanEmail,
         password: newPassword,
       });
 
@@ -72,10 +74,10 @@ const UserManagement: React.FC = () => {
           .from('profiles')
           .upsert([{ 
             id: data.user.id, 
-            email: newEmail, 
+            email: cleanEmail, 
             role: newRole,
             filial: newFilial
-          }]);
+          }], { onConflict: 'id' });
         
         if (profileError) {
           console.warn("Usuário criado na Auth, mas erro no perfil:", profileError.message);
@@ -83,7 +85,7 @@ const UserManagement: React.FC = () => {
         
         setFeedback({
           type: 'success',
-          message: `Usuário ${newEmail} cadastrado com sucesso na FILIAL ${newFilial} como ${newRole.toUpperCase()}!`
+          message: `Usuário ${cleanEmail} cadastrado com sucesso na FILIAL ${newFilial} como ${newRole.toUpperCase()}!`
         });
         setNewEmail('');
         setNewPassword('');
@@ -794,6 +796,9 @@ ALTER TABLE requests ADD COLUMN IF NOT EXISTS filial TEXT DEFAULT '04';
 ALTER TABLE requests ADD COLUMN IF NOT EXISTS display_code TEXT;
 ALTER TABLE requests ADD COLUMN IF NOT EXISTS display_name TEXT;
 ALTER TABLE requests ADD COLUMN IF NOT EXISTS display_image TEXT;
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS photo_status TEXT DEFAULT 'pending';
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS photo_rejection_reason TEXT;
 ALTER TABLE displays ADD COLUMN IF NOT EXISTS department TEXT DEFAULT 'ELMA CHIPS';
 ALTER TABLE displays ADD COLUMN IF NOT EXISTS min_order_value NUMERIC DEFAULT 0;
 
@@ -825,7 +830,7 @@ INSERT INTO departments (name, filial) VALUES
   ('DOCES', '02')
 ON CONFLICT DO NOTHING;
 
--- 5. POLÍTICAS DE SEGURANÇA E ACESSO
+-- 5. POLÍTICAS DE ACESSO TOTAL PARA USUÁRIOS DO SISTEMA
 DO $$ 
 DECLARE 
     pol RECORD;
@@ -839,28 +844,11 @@ ALTER TABLE requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE displays ENABLE ROW LEVEL SECURITY;
 ALTER TABLE departments ENABLE ROW LEVEL SECURITY;
 
--- Admins têm acesso irrestrito (SELECT, INSERT, UPDATE, DELETE)
-CREATE POLICY "adm_master_profiles_v6" ON profiles FOR ALL 
-USING (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'))
-WITH CHECK (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'));
-
-CREATE POLICY "adm_master_requests_v6" ON requests FOR ALL 
-USING (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'))
-WITH CHECK (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'));
-
-CREATE POLICY "adm_master_displays_v6" ON displays FOR ALL 
-USING (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'))
-WITH CHECK (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'));
-
-CREATE POLICY "adm_master_departments_v6" ON departments FOR ALL 
-USING (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'))
-WITH CHECK (auth.jwt() ->> 'email' IN ('admin@gmail.com', 'gabrielicloudgb@gmail.com', 'daniel@francal.com'));
-
--- Vendedores e usuários: Leitura de displays e departamentos
-CREATE POLICY "user_view_displays" ON displays FOR SELECT USING (true);
-CREATE POLICY "user_view_departments" ON departments FOR SELECT USING (true);
-CREATE POLICY "user_view_profile" ON profiles FOR SELECT USING (auth.uid() = id);
-CREATE POLICY "user_manage_requests" ON requests FOR ALL USING (auth.uid() = user_id);`}
+-- Garante acesso a todos os administradores cadastrados (inclusive novos admins como Juda):
+CREATE POLICY "francal_authenticated_profiles" ON profiles FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "francal_authenticated_requests" ON requests FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "francal_authenticated_displays" ON displays FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "francal_authenticated_departments" ON departments FOR ALL TO authenticated USING (true) WITH CHECK (true);`}
           </pre>
         </div>
         

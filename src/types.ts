@@ -50,6 +50,9 @@ export interface DisplayRequest {
   user_email?: string;
   department?: string;
   filial?: string;
+  rejection_reason?: string;
+  photo_status?: 'pending' | 'approved' | 'rejected';
+  photo_rejection_reason?: string;
 }
 
 export const DEFAULT_DEPARTMENTS: Record<string, string[]> = {

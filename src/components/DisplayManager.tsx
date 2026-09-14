@@ -13,6 +13,7 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successFeedback, setSuccessFeedback] = useState<string | null>(null);
 
   // Filter in the catalog list
   const [catalogFilialFilter, setCatalogFilialFilter] = useState<string>(initialFilial || 'TODAS');
@@ -23,6 +24,10 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
   const [isAddingNewDept, setIsAddingNewDept] = useState(false);
   const [newDeptName, setNewDeptName] = useState('');
   const [showDeptManager, setShowDeptManager] = useState(false);
+
+  // Independent state for Industry/Department Manager to NOT override form filial
+  const [deptManagerFilial, setDeptManagerFilial] = useState<string>(initialFilial === 'TODAS' ? '04' : (initialFilial || '04'));
+  const [deptManagerList, setDeptManagerList] = useState<string[]>([]);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -44,12 +49,22 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
     loadDepartments(formData.filial);
   }, [formData.filial]);
 
+  // Update department manager list when deptManagerFilial changes
+  useEffect(() => {
+    loadDeptManagerList(deptManagerFilial);
+  }, [deptManagerFilial]);
+
   async function loadDepartments(filial: string) {
     const list = await getDepartmentsForFilial(filial);
     setAvailableDepartments(list);
     if (!list.includes(formData.department) && list.length > 0) {
       setFormData(prev => ({ ...prev, department: list[0] }));
     }
+  }
+
+  async function loadDeptManagerList(filial: string) {
+    const list = await getDepartmentsForFilial(filial);
+    setDeptManagerList(list);
   }
 
   async function fetchDisplays() {
@@ -117,20 +132,29 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
     const clean = newDeptName.trim().toUpperCase();
     if (!clean) return;
 
-    const updated = await saveDepartmentForFilial(clean, formData.filial);
-    setAvailableDepartments(updated);
-    setFormData(prev => ({ ...prev, department: clean }));
+    const updated = await saveDepartmentForFilial(clean, deptManagerFilial);
+    setDeptManagerList(updated);
+    if (deptManagerFilial === formData.filial) {
+      setAvailableDepartments(updated);
+      setFormData(prev => ({ ...prev, department: clean }));
+    }
     setNewDeptName('');
     setIsAddingNewDept(false);
+    setSuccessFeedback(`Indústria "${clean}" adicionada com sucesso na FILIAL ${deptManagerFilial}!`);
+    setTimeout(() => setSuccessFeedback(null), 4000);
   };
 
   const handleDeleteDepartment = async (deptName: string) => {
-    if (!confirm(`Remover a indústria/departamento "${deptName}" da Filial ${formData.filial}?`)) return;
-    const updated = await removeDepartmentForFilial(deptName, formData.filial);
-    setAvailableDepartments(updated);
-    if (formData.department === deptName && updated.length > 0) {
-      setFormData(prev => ({ ...prev, department: updated[0] }));
+    const updated = await removeDepartmentForFilial(deptName, deptManagerFilial);
+    setDeptManagerList(updated);
+    if (deptManagerFilial === formData.filial) {
+      setAvailableDepartments(updated);
+      if (formData.department === deptName && updated.length > 0) {
+        setFormData(prev => ({ ...prev, department: updated[0] }));
+      }
     }
+    setSuccessFeedback(`Indústria "${deptName}" removida com sucesso da FILIAL ${deptManagerFilial}!`);
+    setTimeout(() => setSuccessFeedback(null), 4000);
   };
 
   const handleSaveDisplay = async (e: React.FormEvent) => {
@@ -195,8 +219,13 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
       }
 
       // Reset form
+      const savedFilial = formData.filial;
+      const savedName = formData.name;
       handleCancelEdit();
-      fetchDisplays();
+      await fetchDisplays();
+      setCatalogFilialFilter(savedFilial);
+      setSuccessFeedback(`Expositor "${savedName}" ${editId ? 'atualizado' : 'cadastrado'} com sucesso na FILIAL ${savedFilial}!`);
+      setTimeout(() => setSuccessFeedback(null), 5000);
     } catch (err: any) {
       console.error(err);
       if (err.message?.includes("min_order_value") || err.message?.includes("filial") || err.message?.includes("column")) {
@@ -244,6 +273,13 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
 
   return (
     <div className="space-y-8">
+      {successFeedback && (
+        <div className="p-4 bg-green-600 text-white font-black text-xs uppercase tracking-widest border-2 border-[#141414] shadow-[4px_4px_0px_0px_rgba(20,20,20,1)] flex items-center justify-between">
+          <span>✓ {successFeedback}</span>
+          <button onClick={() => setSuccessFeedback(null)} className="underline text-[10px]">Fechar</button>
+        </div>
+      )}
+
       {/* Add New Display Form */}
       <section className="bg-white border-2 border-[#141414] p-6 shadow-[8px_8px_0px_0px_rgba(20,20,20,1)]">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 border-b-2 border-[#141414] pb-4">
@@ -271,10 +307,10 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
               <div>
                 <h4 className="font-black uppercase text-xs tracking-tight flex items-center gap-2">
                   <Building2 className="w-4 h-4" />
-                  Indústrias Cadastradas - FILIAL {formData.filial}
+                  Indústrias Cadastradas - FILIAL {deptManagerFilial}
                 </h4>
                 <p className="text-[9px] font-bold text-[#141414]/50 uppercase mt-0.5">
-                  Estas indústrias aparecem como filtro para os vendedores da Filial {formData.filial}.
+                  Estas indústrias aparecem como filtro para os vendedores da Filial {deptManagerFilial}.
                 </p>
               </div>
 
@@ -282,15 +318,15 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
               <div className="flex items-center gap-1 border border-[#141414] p-1 bg-white">
                 <button
                   type="button"
-                  onClick={() => setFormData(p => ({ ...p, filial: '04' }))}
-                  className={`px-2.5 py-0.5 text-[9px] font-mono font-black uppercase ${formData.filial === '04' ? 'bg-[#141414] text-white' : 'hover:bg-gray-100'}`}
+                  onClick={() => setDeptManagerFilial('04')}
+                  className={`px-2.5 py-0.5 text-[9px] font-mono font-black uppercase ${deptManagerFilial === '04' ? 'bg-[#141414] text-white' : 'hover:bg-gray-100'}`}
                 >
                   Filial 04
                 </button>
                 <button
                   type="button"
-                  onClick={() => setFormData(p => ({ ...p, filial: '02' }))}
-                  className={`px-2.5 py-0.5 text-[9px] font-mono font-black uppercase ${formData.filial === '02' ? 'bg-[#141414] text-white' : 'hover:bg-gray-100'}`}
+                  onClick={() => setDeptManagerFilial('02')}
+                  className={`px-2.5 py-0.5 text-[9px] font-mono font-black uppercase ${deptManagerFilial === '02' ? 'bg-[#141414] text-white' : 'hover:bg-gray-100'}`}
                 >
                   Filial 02
                 </button>
@@ -299,14 +335,14 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
 
             {/* List of active departments for this filial */}
             <div className="flex flex-wrap gap-2">
-              {availableDepartments.map(dept => (
-                <div key={dept} className="flex items-center gap-1 bg-white border border-[#141414] px-2.5 py-1 text-xs font-mono font-black uppercase">
+              {deptManagerList.map(dept => (
+                <div key={dept} className="flex items-center gap-1 bg-white border border-[#141414] px-2.5 py-1 text-xs font-mono font-black uppercase shadow-sm">
                   <span>{dept}</span>
                   <button
                     type="button"
                     onClick={() => handleDeleteDepartment(dept)}
-                    className="text-red-500 hover:text-red-700 ml-1 p-0.5"
-                    title="Remover"
+                    className="text-red-500 hover:text-red-700 ml-1.5 p-0.5 font-bold hover:bg-red-50"
+                    title={`Remover ${dept}`}
                   >
                     ×
                   </button>
@@ -318,7 +354,7 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
             <div className="flex items-center gap-2 pt-2 border-t border-[#141414]/10">
               <input
                 type="text"
-                placeholder="NOME DA NOVA INDÚSTRIA (EX: BEBIDAS, DOCES, LIMPEZA...)"
+                placeholder={`NOME DA NOVA INDÚSTRIA PARA FILIAL ${deptManagerFilial} (EX: BEBIDAS, DOCES...)`}
                 value={newDeptName}
                 onChange={e => setNewDeptName(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreateNewDepartment(); } }}
@@ -329,7 +365,7 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
                 onClick={handleCreateNewDepartment}
                 className="px-4 py-2 bg-[#141414] text-white font-black text-xs uppercase tracking-widest hover:bg-opacity-80 transition-all"
               >
-                Adicionar Indústria
+                + Adicionar na Filial {deptManagerFilial}
               </button>
             </div>
           </div>

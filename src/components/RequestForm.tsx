@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Send, AlertCircle, Loader2, Check, Package, Info, Filter, Building2 } from 'lucide-react';
+import { Send, AlertCircle, Loader2, Check, Package, Info, Filter, Building2, Ban, Lock } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Display, DEFAULT_DEPARTMENTS } from '../types';
 import { getDepartmentsForFilial } from '../lib/departments';
@@ -73,6 +73,11 @@ export default function RequestForm({ onSuccess, userFilial = '04', isAdmin = fa
     e.preventDefault();
     if (!selectedDisplay) {
       setError('Por favor, selecione um expositor do catálogo acima.');
+      return;
+    }
+
+    if (selectedDisplay.stock <= 0) {
+      setError('Este modelo de expositor está sem estoque e bloqueado para novas solicitações.');
       return;
     }
     
@@ -286,43 +291,76 @@ export default function RequestForm({ onSuccess, userFilial = '04', isAdmin = fa
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-            {filteredDisplays.map((display) => (
-              <button
-                key={display.id}
-                onClick={() => setSelectedDisplay(display)}
-                className={`group relative text-left border-2 transition-all p-2 ${
-                  selectedDisplay?.id === display.id 
-                    ? 'border-[#141414] bg-[#141414]/5 shadow-[4px_4px_0px_0px_rgba(20,20,20,1)]' 
-                    : 'border-[#141414]/10 hover:border-[#141414]/30'
-                }`}
-              >
-                <div className="aspect-square bg-gray-100 border border-[#141414]/5 mb-3 overflow-hidden transition-all grayscale-[0.5] group-hover:grayscale-0">
-                  <img 
-                    src={display.image_url} 
-                    alt={display.name} 
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                <p className="text-xs font-black uppercase leading-none mb-1 truncate">{display.name}</p>
-                <div className="flex items-center gap-1.5 mt-1 mb-2">
-                  <p className="text-[9px] font-mono font-black text-[#141414]/40">COD: {display.code || '---'}</p>
-                  <span className="text-[8px] font-mono font-black bg-purple-100 text-purple-900 px-1">F{display.filial || '04'}</span>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-1 mt-auto">
-                  <span className={`text-[9px] font-mono font-black border px-1 ${
-                     display.stock > 0 ? 'bg-green-100 text-green-800 border-green-200' : 'bg-red-100 text-red-800 border-red-200'
-                  }`}>
-                    QTD: {display.stock}
-                  </span>
-                  {display.min_order_value > 0 && (
-                    <span className="text-[9px] font-mono font-black border bg-blue-100 text-blue-800 border-blue-200 px-1">
-                      MIN: R${display.min_order_value}
-                    </span>
+            {filteredDisplays.map((display) => {
+              const isOutOfStock = (display.stock || 0) <= 0;
+              const isSelected = selectedDisplay?.id === display.id;
+
+              return (
+                <button
+                  key={display.id}
+                  type="button"
+                  disabled={isOutOfStock}
+                  onClick={() => {
+                    if (isOutOfStock) {
+                      setError(`O expositor "${display.name}" está sem estoque e não pode ser selecionado.`);
+                      return;
+                    }
+                    setSelectedDisplay(display);
+                  }}
+                  className={`group relative text-left border-2 transition-all p-2.5 flex flex-col justify-between ${
+                    isOutOfStock
+                      ? 'border-red-300 bg-red-50/50 opacity-60 cursor-not-allowed hover:border-red-400'
+                      : isSelected
+                      ? 'border-[#141414] bg-[#141414]/5 shadow-[4px_4px_0px_0px_rgba(20,20,20,1)]'
+                      : 'border-[#141414]/15 hover:border-[#141414]/50 bg-white'
+                  }`}
+                >
+                  {/* Out of Stock Overlay Banner */}
+                  {isOutOfStock && (
+                    <div className="absolute top-2 left-2 right-2 z-10 bg-red-600 text-white font-black text-[9px] uppercase tracking-widest py-1 px-2 flex items-center justify-center gap-1 shadow-md">
+                      <Lock className="w-3 h-3" />
+                      Sem Estoque (Bloqueado)
+                    </div>
                   )}
-                  {selectedDisplay?.id === display.id && <Check className="w-4 h-4 text-[#141414]" />}
-                </div>
-              </button>
-            ))}
+
+                  <div className={`aspect-square bg-gray-100 border border-[#141414]/10 mb-3 overflow-hidden transition-all relative ${
+                    isOutOfStock ? 'grayscale opacity-60' : 'grayscale-[0.3] group-hover:grayscale-0'
+                  }`}>
+                    <img 
+                      src={display.image_url} 
+                      alt={display.name} 
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+
+                  <div>
+                    <p className={`text-xs font-black uppercase leading-tight mb-1 line-clamp-2 ${isOutOfStock ? 'text-gray-500 line-through' : ''}`}>
+                      {display.name}
+                    </p>
+                    <div className="flex items-center gap-1.5 mt-1 mb-2">
+                      <p className="text-[9px] font-mono font-black text-[#141414]/40">COD: {display.code || '---'}</p>
+                      <span className="text-[8px] font-mono font-black bg-purple-100 text-purple-900 px-1">F{display.filial || '04'}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-1 mt-auto pt-2 border-t border-[#141414]/10">
+                    <span className={`text-[9px] font-mono font-black border px-1.5 py-0.5 ${
+                       isOutOfStock 
+                         ? 'bg-red-600 text-white border-red-700 font-bold' 
+                         : 'bg-green-100 text-green-800 border-green-200'
+                    }`}>
+                      {isOutOfStock ? 'ESTOQUE ZERO' : `QTD: ${display.stock}`}
+                    </span>
+                    {display.min_order_value > 0 && (
+                      <span className="text-[9px] font-mono font-black border bg-blue-100 text-blue-800 border-blue-200 px-1">
+                        MIN: R${display.min_order_value}
+                      </span>
+                    )}
+                    {isSelected && !isOutOfStock && <Check className="w-4 h-4 text-[#141414]" />}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         )}
       </section>
