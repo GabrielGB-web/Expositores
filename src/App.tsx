@@ -8,6 +8,7 @@ import { Package, ClipboardList, PackagePlus, LogOut, User, Shield, Users, Build
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './lib/supabase';
 import { Profile } from './types';
+import { normalizeFilial } from './lib/staff';
 import RequestForm from './components/RequestForm';
 import RequestList from './components/RequestList';
 import DisplayManager from './components/DisplayManager';
@@ -77,12 +78,24 @@ export default function App() {
   async function fetchProfile(uid: string, email?: string) {
     try {
       const currentUserEmail = email || session?.user?.email;
+      const cleanEmail = (currentUserEmail || '').toLowerCase().trim();
       const isOwnerEmail = 
-        currentUserEmail === 'admin@gmail.com' || 
-        currentUserEmail === 'gabrielicloudgb@gmail.com' || 
-        currentUserEmail === 'daniel@francal.com';
+        cleanEmail === 'admin@gmail.com' || 
+        cleanEmail === 'gabrielicloudgb@gmail.com' || 
+        cleanEmail === 'daniel@francal.com' ||
+        cleanEmail.includes('juda');
 
-      console.log("Sistema: Verificando perfil para:", currentUserEmail);
+      const isFilial02Email = 
+        cleanEmail.includes('juda') || 
+        cleanEmail.includes('deivid') || 
+        cleanEmail.includes('adriana');
+
+      // Obtém metadados gravados na criação do usuário no Supabase Auth
+      const userMeta = session?.user?.user_metadata || {};
+      const metaFilial = userMeta.filial as string | undefined;
+      const metaRole = userMeta.role as 'admin' | 'vendedor' | undefined;
+
+      console.log("Sistema: Verificando perfil para:", currentUserEmail, "Meta:", { metaFilial, metaRole });
 
       // 1. Busca perfil pelo id de autenticação
       let { data: currentProfile, error: fetchError } = await supabase
@@ -102,7 +115,6 @@ export default function App() {
         if (profileByEmail) {
           console.log("Sistema: Perfil vinculado encontrado pelo e-mail:", profileByEmail);
           currentProfile = profileByEmail;
-          // Vincula o ID atual de autenticação no perfil
           try {
             await supabase
               .from('profiles')
@@ -112,61 +124,81 @@ export default function App() {
         }
       }
 
+      const defaultRole = (isOwnerEmail || metaRole === 'admin') ? 'admin' : (metaRole || 'vendedor');
+      const defaultFilial = metaFilial ? normalizeFilial(metaFilial) : (isFilial02Email ? '02' : '04');
+
       if (fetchError && !currentProfile) {
         console.error("Sistema: Erro ao buscar perfil no Supabase:", fetchError.message);
         if (isOwnerEmail) {
+          const filialToSet = normalizeFilial(metaFilial || defaultFilial);
           setProfile({
             id: uid,
             email: currentUserEmail || '',
             role: 'admin',
-            filial: '04'
+            filial: filialToSet
           });
+          setAdminSelectedFilial(filialToSet);
           setInitLoading(false);
           return;
         }
       }
 
-      const defaultRole = isOwnerEmail ? 'admin' : 'vendedor';
-
       if (!currentProfile) {
-        console.log("Sistema: Perfil não existente, criando padrão...");
+        console.log("Sistema: Perfil não existente, criando com Filial:", defaultFilial, "Cargo:", defaultRole);
         const { data: createdProfile, error: createError } = await supabase
           .from('profiles')
           .insert([{ 
             id: uid, 
             email: currentUserEmail || '', 
             role: defaultRole,
-            filial: '04'
+            filial: defaultFilial
           }])
           .select()
           .single();
 
+        const finalFilial = normalizeFilial(createdProfile?.filial || defaultFilial);
         if (createError) {
           console.warn("Sistema: Falha ao inserir perfil inicial:", createError.message);
           setProfile({
             id: uid,
             email: currentUserEmail || '',
             role: defaultRole,
-            filial: '04'
+            filial: finalFilial
           });
         } else {
-          setProfile({ ...createdProfile, filial: createdProfile.filial || '04' });
+          setProfile({ ...createdProfile, filial: finalFilial });
         }
+        setAdminSelectedFilial(finalFilial);
       } else {
         console.log("Sistema: Perfil carregado com sucesso. Cargo:", currentProfile.role, "Filial:", currentProfile.filial);
-        if (isOwnerEmail && currentProfile.role !== 'admin') {
-          console.log("Sistema: Promovendo proprietário para ADMIN...");
-          await supabase.from('profiles').update({ role: 'admin' }).eq('id', uid);
+        
+        // Se foi promovido a admin (ou é Juda/fundador)
+        if ((isOwnerEmail || metaRole === 'admin') && currentProfile.role !== 'admin') {
+          console.log("Sistema: Promovendo para ADMIN...");
+          try {
+            await supabase.from('profiles').update({ role: 'admin' }).eq('id', uid);
+          } catch {}
           currentProfile.role = 'admin';
         }
+
+        // Se no cadastro foi definido metaFilial ou é usuário da 02
+        const targetFilial = metaFilial ? normalizeFilial(metaFilial) : (isFilial02Email ? '02' : normalizeFilial(currentProfile.filial));
+        if (targetFilial && normalizeFilial(currentProfile.filial) !== targetFilial) {
+          console.log(`Sistema: Atualizando filial do banco de ${currentProfile.filial} para ${targetFilial}...`);
+          try {
+            await supabase.from('profiles').update({ filial: targetFilial }).eq('id', uid);
+          } catch {}
+          currentProfile.filial = targetFilial;
+        }
         
+        const finalNormalizedFilial = normalizeFilial(currentProfile.filial || defaultFilial);
         setProfile({
           ...currentProfile,
-          filial: currentProfile.filial || '04'
+          filial: finalNormalizedFilial
         });
 
         if (!adminSelectedFilial) {
-          setAdminSelectedFilial(currentProfile.filial || '04');
+          setAdminSelectedFilial(finalNormalizedFilial);
         }
       }
     } catch (err: any) {
@@ -378,7 +410,7 @@ export default function App() {
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.2 }}
             >
-              <UserManagement />
+              <UserManagement currentUserFilial={activeFilial} />
             </motion.div>
           )}
         </AnimatePresence>

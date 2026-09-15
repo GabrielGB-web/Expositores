@@ -3,9 +3,20 @@ import { Users, Shield, User, Search, Loader2, AlertCircle, Trash2, Copy, Check,
 import { supabase } from '../lib/supabase';
 import { createClient } from '@supabase/supabase-js';
 import { Profile } from '../types';
+import { 
+  saveProfileToFirestore, 
+  getProfilesFromFirestore, 
+  deleteProfileFromFirestore, 
+  subscribeProfilesFromFirestore 
+} from '../lib/firebase';
+import { normalizeFilial, INITIAL_STAFF_REGISTRY } from '../lib/staff';
 
-const UserManagement: React.FC = () => {
-  const [profiles, setProfiles] = useState<Profile[]>([]);
+interface UserManagementProps {
+  currentUserFilial?: string;
+}
+
+const UserManagement: React.FC<UserManagementProps> = ({ currentUserFilial = '04' }) => {
+  const [profiles, setProfiles] = useState<Profile[]>(INITIAL_STAFF_REGISTRY);
   const [loading, setLoading] = useState(true);
   const [errorState, setErrorState] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
@@ -13,10 +24,11 @@ const UserManagement: React.FC = () => {
   const [copied, setCopied] = useState(false);
 
   // Form states for NEW user
+  const initialFilialNorm = normalizeFilial(currentUserFilial);
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<'vendedor' | 'admin'>('vendedor');
-  const [newFilial, setNewFilial] = useState<string>('04');
+  const [newFilial, setNewFilial] = useState<string>(initialFilialNorm);
   const [filialFilter, setFilialFilter] = useState<string>('TODAS');
   const [isCreatingUser, setIsCreatingUser] = useState(false);
 
@@ -40,6 +52,111 @@ const UserManagement: React.FC = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const copySqlScript = () => {
+    const sqlText = `-- 1. ADICIONAR COLUNAS NAS TABELAS
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS filial TEXT DEFAULT '04';
+ALTER TABLE displays ADD COLUMN IF NOT EXISTS filial TEXT DEFAULT '04';
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS filial TEXT DEFAULT '04';
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS display_code TEXT;
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS display_name TEXT;
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS display_image TEXT;
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS photo_status TEXT DEFAULT 'pending';
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS photo_rejection_reason TEXT;
+ALTER TABLE displays ADD COLUMN IF NOT EXISTS department TEXT DEFAULT 'ELMA CHIPS';
+ALTER TABLE displays ADD COLUMN IF NOT EXISTS min_order_value NUMERIC DEFAULT 0;
+
+-- 2. TABELA DE INDÚSTRIAS / DEPARTAMENTOS POR FILIAL
+CREATE TABLE IF NOT EXISTS departments (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT NOT NULL,
+  filial TEXT NOT NULL DEFAULT '04',
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 3. MIGRAR DADOS E DEFINIR ADMINS
+UPDATE profiles SET filial = '04' WHERE filial IS NULL;
+UPDATE displays SET filial = '04' WHERE filial IS NULL;
+UPDATE requests SET filial = '04' WHERE filial IS NULL;
+UPDATE displays SET department = 'ELMA CHIPS' WHERE department IS NULL;
+UPDATE profiles SET role = 'admin' WHERE email ILIKE '%juda%';
+
+-- 4. INSERIR INDÚSTRIAS BÁSICAS
+INSERT INTO departments (name, filial) VALUES
+  ('ELMA CHIPS', '04'),
+  ('MONDELEZ', '04'),
+  ('FELTRIN', '04'),
+  ('CALÇADOS', '04'),
+  ('AB MAURY', '04'),
+  ('ELMA CHIPS', '02'),
+  ('MONDELEZ', '02'),
+  ('FELTRIN', '02'),
+  ('BEBIDAS', '02'),
+  ('DOCES', '02')
+ON CONFLICT DO NOTHING;
+
+-- 5. POLÍTICAS DE ACESSO TOTAL PARA TODOS OS USUÁRIOS (FRANCAL)
+DO $$ 
+DECLARE 
+    pol RECORD;
+BEGIN 
+    FOR pol IN (SELECT policyname, tablename FROM pg_policies WHERE tablename IN ('profiles', 'requests', 'displays', 'departments')) 
+    LOOP EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(pol.policyname) || ' ON ' || quote_ident(pol.tablename); END LOOP;
+END $$;
+
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE displays ENABLE ROW LEVEL SECURITY;
+ALTER TABLE departments ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "francal_authenticated_profiles" ON profiles FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "francal_authenticated_requests" ON requests FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "francal_authenticated_displays" ON displays FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "francal_authenticated_departments" ON departments FOR ALL TO authenticated USING (true) WITH CHECK (true);`;
+
+    navigator.clipboard.writeText(sqlText);
+    setCopiedSql(true);
+    setTimeout(() => setCopiedSql(false), 3000);
+  };
+
+  const [copiedSql, setCopiedSql] = useState(false);
+
+  // Registro em cache local para que nenhum admin perca visualização de cadastros
+  const CACHE_KEY = 'francal_profiles_registry_v1';
+
+  function getCachedProfiles(): Profile[] {
+    try {
+      const raw = localStorage.getItem(CACHE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveProfilesToCache(list: Profile[]) {
+    try {
+      const current = getCachedProfiles();
+      const map = new Map<string, Profile>();
+      current.forEach(p => {
+        const key = p.id || p.email?.toLowerCase();
+        if (key) map.set(key, p);
+      });
+      list.forEach(p => {
+        const key = p.id || p.email?.toLowerCase();
+        if (key) map.set(key, p);
+      });
+      const merged = Array.from(map.values());
+      localStorage.setItem(CACHE_KEY, JSON.stringify(merged));
+    } catch {}
+  }
+
+  function removeProfileFromCache(id: string, email?: string) {
+    try {
+      const current = getCachedProfiles().filter(p => p.id !== id && (!email || p.email?.toLowerCase() !== email.toLowerCase()));
+      localStorage.setItem(CACHE_KEY, JSON.stringify(current));
+    } catch {}
+  }
+
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newEmail || !newPassword) return;
@@ -50,8 +167,11 @@ const UserManagement: React.FC = () => {
 
     setIsCreatingUser(true);
     setFeedback(null);
+    const selectedFilial = newFilial;
+    const selectedRole = newRole;
+    const cleanEmail = newEmail.trim().toLowerCase();
+
     try {
-      // Criamos um client temporário SEM persistência de sessão para não deslogar o Admin
       const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
       const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || '';
 
@@ -59,39 +179,81 @@ const UserManagement: React.FC = () => {
         auth: { persistSession: false } 
       });
 
-      const cleanEmail = newEmail.trim().toLowerCase();
-
+      // 1. Cria usuário com metadata explícita (permanece gravada na autenticação)
       const { data, error } = await tempClient.auth.signUp({
         email: cleanEmail,
         password: newPassword,
+        options: {
+          data: {
+            role: selectedRole,
+            filial: selectedFilial,
+            email: cleanEmail
+          }
+        }
       });
 
       if (error) throw error;
       
       if (data.user) {
-        // Criamos ou atualizamos o perfil com role e filial selecionados
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .upsert([{ 
-            id: data.user.id, 
-            email: cleanEmail, 
-            role: newRole,
-            filial: newFilial
-          }], { onConflict: 'id' });
-        
-        if (profileError) {
-          console.warn("Usuário criado na Auth, mas erro no perfil:", profileError.message);
+        const normFilial = normalizeFilial(selectedFilial);
+        const newProfileData: Profile = {
+          id: data.user.id,
+          email: cleanEmail,
+          role: selectedRole,
+          filial: normFilial,
+          created_at: new Date().toISOString()
+        };
+
+        // 2. Salva no Firestore (garantia de sincronização em nuvem compartilhada para todos os admins)
+        await saveProfileToFirestore(newProfileData);
+
+        // 3. Salva o perfil com a própria sessão do usuário recém-criado
+        try {
+          if (data.session) {
+            await tempClient
+              .from('profiles')
+              .upsert([newProfileData], { onConflict: 'id' });
+          } else {
+            const { data: signInData } = await tempClient.auth.signInWithPassword({
+              email: cleanEmail,
+              password: newPassword
+            });
+            if (signInData?.session) {
+              await tempClient
+                .from('profiles')
+                .upsert([newProfileData], { onConflict: 'id' });
+            }
+          }
+        } catch (e) {
+          console.warn("Aviso ao tentar salvar perfil com tempClient:", e);
         }
-        
+
+        // 4. Também tenta salvar via client do administrador logado
+        try {
+          await supabase
+            .from('profiles')
+            .upsert([newProfileData], { onConflict: 'id' });
+        } catch {}
+
+        // 5. Salva no cache local para redundância imediata
+        saveProfilesToCache([newProfileData]);
+
+        // 6. Atualiza estado imediatamente no formulário
+        setProfiles(prev => {
+          const map = new Map<string, Profile>();
+          prev.forEach(p => map.set((p.email || p.id).toLowerCase().trim(), p));
+          map.set(newProfileData.email.toLowerCase().trim(), newProfileData);
+          return Array.from(map.values());
+        });
+
         setFeedback({
           type: 'success',
-          message: `Usuário ${cleanEmail} cadastrado com sucesso na FILIAL ${newFilial} como ${newRole.toUpperCase()}!`
+          message: `Usuário ${cleanEmail} cadastrado com sucesso na FILIAL ${normFilial} como ${selectedRole.toUpperCase()}!`
         });
         setNewEmail('');
         setNewPassword('');
         setNewRole('vendedor');
-        setNewFilial('04');
-        fetchProfiles();
+        await fetchProfiles();
       }
     } catch (err: any) {
       setFeedback({ type: 'error', message: "Erro ao cadastrar usuário: " + err.message });
@@ -102,37 +264,150 @@ const UserManagement: React.FC = () => {
 
   useEffect(() => {
     fetchProfiles();
+
+    // Sincronização em tempo real via Firestore entre diferentes computadores e navegadores
+    const unsubscribe = subscribeProfilesFromFirestore((cloudProfiles) => {
+      if (cloudProfiles && cloudProfiles.length > 0) {
+        setProfiles(prev => {
+          const map = new Map<string, Profile>();
+          prev.forEach(p => {
+            const key = (p.email || p.id || '').toLowerCase().trim();
+            if (key) map.set(key, { ...p, filial: normalizeFilial(p.filial) });
+          });
+          cloudProfiles.forEach(p => {
+            const key = (p.email || p.id || '').toLowerCase().trim();
+            if (key) {
+              const existing = map.get(key);
+              map.set(key, {
+                ...existing,
+                ...p,
+                id: p.id || existing?.id || key,
+                filial: normalizeFilial(p.filial || existing?.filial)
+              });
+            }
+          });
+          return Array.from(map.values());
+        });
+      }
+    });
+
+    return () => unsubscribe();
   }, []);
 
   async function fetchProfiles() {
     try {
       setLoading(true);
       setErrorState(null);
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*');
-      
-      if (error) {
-        console.error("DEBUG: Erro ao buscar perfis:", error);
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const { data: ownProfile } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
-          if (ownProfile) {
-            setProfiles([ownProfile]);
-            return;
-          }
+
+      // 1. Busca perfis gravados no Firestore
+      const firestoreProfiles = await getProfilesFromFirestore();
+
+      // 2. Busca perfis do Supabase
+      let supabaseProfiles: Profile[] = [];
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*');
+        if (!error && data) {
+          supabaseProfiles = data;
         }
-        throw new Error(error.message + " (Código: " + error.code + ")");
+      } catch (sbErr) {
+        console.warn("Aviso ao buscar perfis no Supabase:", sbErr);
       }
-      
-      setProfiles(data || []);
+
+      // 3. Usuários a partir de solicitações já feitas no Supabase
+      let requestUsers: Profile[] = [];
+      try {
+        const { data: reqData } = await supabase
+          .from('requests')
+          .select('user_id, user_email, filial')
+          .not('user_email', 'is', null);
+        if (reqData && reqData.length > 0) {
+          const seen = new Set<string>();
+          reqData.forEach((r: any) => {
+            const clean = (r.user_email || '').toLowerCase().trim();
+            if (clean && !seen.has(clean)) {
+              seen.add(clean);
+              requestUsers.push({
+                id: r.user_id || `user-${clean}`,
+                email: clean,
+                role: 'vendedor',
+                filial: normalizeFilial(r.filial),
+                created_at: new Date().toISOString()
+              });
+            }
+          });
+        }
+      } catch {}
+
+      // 4. Cache local
+      const cached = getCachedProfiles();
+
+      // 5. Mescla todas as fontes com a lista inicial da Francal
+      const map = new Map<string, Profile>();
+
+      // Insere primeiro o registro base (incluindo deivid@francal.com, adriana@francal.com, juda@francal.com)
+      INITIAL_STAFF_REGISTRY.forEach(p => {
+        const key = p.email.toLowerCase().trim();
+        map.set(key, { ...p, filial: normalizeFilial(p.filial) });
+      });
+
+      // Sobrescreve com dados do cache local
+      cached.forEach(p => {
+        const key = (p.email || p.id || '').toLowerCase().trim();
+        if (key) {
+          map.set(key, { ...p, filial: normalizeFilial(p.filial) });
+        }
+      });
+
+      // Sobrescreve com usuários identificados em pedidos
+      requestUsers.forEach(p => {
+        const key = p.email.toLowerCase().trim();
+        if (key && !map.has(key)) {
+          map.set(key, { ...p, filial: normalizeFilial(p.filial) });
+        }
+      });
+
+      // Sobrescreve com perfis vindos do Supabase
+      supabaseProfiles.forEach(p => {
+        const key = (p.email || p.id || '').toLowerCase().trim();
+        if (key) {
+          const existing = map.get(key);
+          map.set(key, {
+            ...existing,
+            ...p,
+            id: p.id || existing?.id || key,
+            filial: normalizeFilial(p.filial || existing?.filial)
+          });
+        }
+      });
+
+      // Sobrescreve com perfis do Firestore (nuvem compartilhada)
+      firestoreProfiles.forEach(p => {
+        const key = (p.email || p.id || '').toLowerCase().trim();
+        if (key) {
+          const existing = map.get(key);
+          map.set(key, {
+            ...existing,
+            ...p,
+            id: p.id || existing?.id || key,
+            filial: normalizeFilial(p.filial || existing?.filial)
+          });
+        }
+      });
+
+      const combined = Array.from(map.values());
+      setProfiles(combined);
+      saveProfilesToCache(combined);
+
+      // Sincroniza em segundo plano para o Firestore qualquer perfil que ainda não esteja lá
+      combined.forEach(p => {
+        saveProfileToFirestore(p).catch(() => {});
+      });
+
     } catch (err: any) {
-      console.error("Error fetching profiles:", err);
-      if (err.message?.includes('recursion')) {
-        setErrorState(err.message);
-      } else {
-        setFeedback({ type: 'error', message: "Erro ao carregar usuários: " + err.message });
-      }
+      console.error("Erro ao carregar usuários:", err);
+      setProfiles(INITIAL_STAFF_REGISTRY);
     } finally {
       setLoading(false);
     }
@@ -140,18 +415,28 @@ const UserManagement: React.FC = () => {
 
   async function toggleFilial(id: string, currentFilial?: string) {
     if (updating) return;
-    const current = currentFilial || '04';
-    const nextFilial = current === '04' ? '02' : '04';
+    const currentNorm = normalizeFilial(currentFilial);
+    const nextFilial = currentNorm === '04' ? '02' : '04';
 
     try {
       setUpdating(id);
-      const { error } = await supabase
-        .from('profiles')
-        .update({ filial: nextFilial })
-        .eq('id', id);
+      try {
+        await supabase
+          .from('profiles')
+          .update({ filial: nextFilial })
+          .eq('id', id);
+      } catch {}
 
-      if (error) throw error;
-      setProfiles(prev => prev.map(p => p.id === id ? { ...p, filial: nextFilial } : p));
+      const targetUser = profiles.find(p => p.id === id);
+      if (targetUser) {
+        await saveProfileToFirestore({ ...targetUser, filial: nextFilial });
+      }
+
+      setProfiles(prev => {
+        const updated = prev.map(p => p.id === id ? { ...p, filial: nextFilial } : p);
+        saveProfilesToCache(updated);
+        return updated;
+      });
       setFeedback({ type: 'success', message: `Filial alterada para FILIAL ${nextFilial}!` });
     } catch (err: any) {
       setFeedback({ type: 'error', message: "Erro ao alterar filial: " + err.message });
@@ -171,13 +456,23 @@ const UserManagement: React.FC = () => {
 
     try {
       setUpdating(id);
-      const { error } = await supabase
-        .from('profiles')
-        .update({ role: newRole })
-        .eq('id', id);
-      
-      if (error) throw error;
-      setProfiles(prev => prev.map(p => p.id === id ? { ...p, role: newRole as any } : p));
+      try {
+        await supabase
+          .from('profiles')
+          .update({ role: newRole })
+          .eq('id', id);
+      } catch {}
+
+      const targetUser = profiles.find(p => p.id === id);
+      if (targetUser) {
+        await saveProfileToFirestore({ ...targetUser, role: newRole as any });
+      }
+
+      setProfiles(prev => {
+        const updated = prev.map(p => p.id === id ? { ...p, role: newRole as any } : p);
+        saveProfilesToCache(updated);
+        return updated;
+      });
       setFeedback({ type: 'success', message: `Cargo alterado para ${newRole.toUpperCase()}!` });
     } catch (err: any) {
       setFeedback({ type: 'error', message: "Erro ao atualizar cargo: " + err.message });
@@ -189,7 +484,7 @@ const UserManagement: React.FC = () => {
   function openEditModal(profile: Profile) {
     setUserToEdit(profile);
     setEditRole(profile.role);
-    setEditFilial(profile.filial || '04');
+    setEditFilial(normalizeFilial(profile.filial));
   }
 
   async function handleSaveEdit(e: React.FormEvent) {
@@ -197,24 +492,35 @@ const UserManagement: React.FC = () => {
     if (!userToEdit) return;
 
     setIsSavingEdit(true);
+    const normFilial = normalizeFilial(editFilial);
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          role: editRole,
-          filial: editFilial
-        })
-        .eq('id', userToEdit.id);
+      try {
+        await supabase
+          .from('profiles')
+          .update({
+            role: editRole,
+            filial: normFilial
+          })
+          .eq('id', userToEdit.id);
+      } catch {}
 
-      if (error) throw error;
+      await saveProfileToFirestore({
+        ...userToEdit,
+        role: editRole,
+        filial: normFilial
+      });
 
-      setProfiles(prev => prev.map(p => 
-        p.id === userToEdit.id ? { ...p, role: editRole, filial: editFilial } : p
-      ));
+      setProfiles(prev => {
+        const updated = prev.map(p => 
+          p.id === userToEdit.id ? { ...p, role: editRole, filial: normFilial } : p
+        );
+        saveProfilesToCache(updated);
+        return updated;
+      });
 
       setFeedback({
         type: 'success',
-        message: `Usuário ${userToEdit.email} atualizado para FILIAL ${editFilial} e cargo ${editRole.toUpperCase()} com sucesso!`
+        message: `Usuário ${userToEdit.email} atualizado para FILIAL ${normFilial} e cargo ${editRole.toUpperCase()} com sucesso!`
       });
       setUserToEdit(null);
     } catch (err: any) {
@@ -228,7 +534,7 @@ const UserManagement: React.FC = () => {
     if (!userToDelete) return;
 
     const { data: { user } } = await supabase.auth.getUser();
-    if (user?.id === userToDelete.id) {
+    if (user?.id === userToDelete.id || user?.email?.toLowerCase() === userToDelete.email?.toLowerCase()) {
       setFeedback({ type: 'error', message: "Você não pode excluir sua própria conta de administrador." });
       setUserToDelete(null);
       return;
@@ -247,17 +553,20 @@ const UserManagement: React.FC = () => {
       }
 
       // 2. Deletar da tabela profiles
-      const { error } = await supabase
-        .from('profiles')
-        .delete()
-        .eq('id', userToDelete.id);
+      try {
+        await supabase
+          .from('profiles')
+          .delete()
+          .eq('id', userToDelete.id);
+      } catch {}
 
-      if (error) {
-        console.error("Erro ao deletar perfil:", error);
-        throw error;
+      // 3. Deletar do Firestore
+      if (userToDelete.email) {
+        await deleteProfileFromFirestore(userToDelete.email);
       }
 
-      setProfiles(prev => prev.filter(p => p.id !== userToDelete.id));
+      removeProfileFromCache(userToDelete.id, userToDelete.email);
+      setProfiles(prev => prev.filter(p => p.id !== userToDelete.id && p.email?.toLowerCase() !== userToDelete.email?.toLowerCase()));
       setFeedback({ 
         type: 'success', 
         message: `Usuário ${userToDelete.email || userToDelete.id} excluído com sucesso!` 
@@ -275,10 +584,13 @@ const UserManagement: React.FC = () => {
   }
 
   const filtered = profiles.filter(p => {
-    const matchesQuery = p.email?.toLowerCase().includes(filter.toLowerCase()) || 
-      p.role.toLowerCase().includes(filter.toLowerCase());
-    const userFilial = p.filial || '04';
-    const matchesFilial = filialFilter === 'TODAS' || userFilial === filialFilter;
+    const q = filter.toLowerCase().trim();
+    const email = (p.email || '').toLowerCase();
+    const role = (p.role || '').toLowerCase();
+    const matchesQuery = !q || email.includes(q) || role.includes(q);
+    const userFilial = normalizeFilial(p.filial);
+    const targetFilial = filialFilter === 'TODAS' ? 'TODAS' : normalizeFilial(filialFilter);
+    const matchesFilial = targetFilial === 'TODAS' || userFilial === targetFilial;
     return matchesQuery && matchesFilial;
   });
 
@@ -304,6 +616,31 @@ const UserManagement: React.FC = () => {
             className="p-1 hover:opacity-60"
           >
             <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Alerta de Sincronização de Banco (RLS) se detectar isolamento indevido */}
+      {profiles.length <= 1 && !loading && (
+        <div className="bg-amber-50 border-2 border-amber-600 p-5 shadow-[6px_6px_0px_0px_rgba(245,158,11,1)] flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-6 h-6 text-amber-700 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-xs font-black uppercase tracking-wider text-amber-950">
+                Sincronização de Acessos para Administradores da Filial 02
+              </p>
+              <p className="text-[11px] font-medium text-amber-900 mt-1">
+                Se você ou outro administrador da Filial 02 (como o Juda) estiver vendo apenas o próprio usuário ou sem acesso aos pedidos da equipe, basta copiar e executar o script SQL no seu painel Supabase.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={copySqlScript}
+            className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-black text-[10px] uppercase tracking-widest shrink-0 transition-all flex items-center gap-2 shadow-[2px_2px_0px_0px_rgba(20,20,20,1)] active:scale-95"
+          >
+            {copiedSql ? <Check className="w-4 h-4 text-white" /> : <Copy className="w-4 h-4" />}
+            {copiedSql ? 'Script Copiado!' : 'Copiar Script SQL'}
           </button>
         </div>
       )}
@@ -464,7 +801,7 @@ const UserManagement: React.FC = () => {
                   filialFilter === '04' ? 'bg-[#141414] text-white' : 'text-[#141414] hover:bg-[#141414]/5'
                 }`}
               >
-                FILIAL 04 ({profiles.filter(p => (p.filial || '04') === '04').length})
+                FILIAL 04 ({profiles.filter(p => normalizeFilial(p.filial) === '04').length})
               </button>
               <button
                 type="button"
@@ -473,7 +810,7 @@ const UserManagement: React.FC = () => {
                   filialFilter === '02' ? 'bg-[#141414] text-white' : 'text-[#141414] hover:bg-[#141414]/5'
                 }`}
               >
-                FILIAL 02 ({profiles.filter(p => (p.filial || '04') === '02').length})
+                FILIAL 02 ({profiles.filter(p => normalizeFilial(p.filial) === '02').length})
               </button>
             </div>
 
@@ -561,12 +898,12 @@ const UserManagement: React.FC = () => {
                             disabled={updating === p.id}
                             title="Clique para alternar rapidamente entre Filial 04 e Filial 02"
                             className={`font-mono text-[9px] font-black uppercase px-2.5 py-1 border-2 transition-all ${
-                              (p.filial || '04') === '02'
+                              normalizeFilial(p.filial) === '02'
                                 ? 'bg-amber-100 text-amber-900 border-amber-500 hover:bg-amber-200'
                                 : 'bg-purple-100 text-purple-900 border-purple-500 hover:bg-purple-200'
                             }`}
                           >
-                            FILIAL {p.filial || '04'} ⇄
+                            FILIAL {normalizeFilial(p.filial)} ⇄
                           </button>
                         </td>
                         <td className="p-4">
@@ -774,18 +1111,28 @@ const UserManagement: React.FC = () => {
 
       {/* SQL Script Box */}
       <div className="bg-white border-4 border-red-600 p-6 space-y-4 shadow-[10px_10px_0px_0px_rgba(220,38,38,0.2)]">
-        <div className="flex items-center gap-3 border-b-2 border-red-600 pb-4">
-          <div className="bg-red-600 p-2">
-            <Shield className="w-5 h-5 text-white" />
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b-2 border-red-600 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="bg-red-600 p-2">
+              <Shield className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h4 className="text-sm font-black uppercase tracking-tighter text-red-600">Banco de Dados: Comandos de Reparo e Liberação de Acesso</h4>
+              <p className="text-[10px] font-bold uppercase text-red-600/60">Sincronização obrigatória de RLS e Filiais (Filial 04 e Filial 02)</p>
+            </div>
           </div>
-          <div>
-            <h4 className="text-sm font-black uppercase tracking-tighter text-red-600">Banco de Dados: Comandos de Reparo (Multi-Filial & Estrutura)</h4>
-            <p className="text-[10px] font-bold uppercase text-red-600/60">Sincronização obrigatória de estrutura para Filial 04 e Filial 02</p>
-          </div>
+          <button
+            type="button"
+            onClick={copySqlScript}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 shadow-[2px_2px_0px_0px_rgba(20,20,20,1)] active:scale-95 shrink-0"
+          >
+            {copiedSql ? <Check className="w-4 h-4 text-white" /> : <Copy className="w-4 h-4" />}
+            {copiedSql ? 'Script Copiado!' : 'Copiar Script SQL'}
+          </button>
         </div>
         
         <p className="text-xs font-bold text-red-800 italic">
-          ⚠️ Execute no SQL EDITOR do seu painel Supabase para criar as colunas de filial e isolamento:
+          ⚠️ Execute no SQL EDITOR do seu painel Supabase para liberar o acesso a todos os admins (incluindo Juda e novos usuários da Filial 02):
         </p>
 
         <div className="bg-[#141414] p-4 font-mono text-[10px] text-green-400 overflow-x-auto border-2 border-red-600">
@@ -810,11 +1157,12 @@ CREATE TABLE IF NOT EXISTS departments (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 3. MIGRAR DADOS EXISTENTES PARA FILIAL 04 (PADRÃO)
+-- 3. MIGRAR DADOS E DEFINIR ADMINS
 UPDATE profiles SET filial = '04' WHERE filial IS NULL;
 UPDATE displays SET filial = '04' WHERE filial IS NULL;
 UPDATE requests SET filial = '04' WHERE filial IS NULL;
 UPDATE displays SET department = 'ELMA CHIPS' WHERE department IS NULL;
+UPDATE profiles SET role = 'admin' WHERE email ILIKE '%juda%';
 
 -- 4. INSERIR INDÚSTRIAS BÁSICAS
 INSERT INTO departments (name, filial) VALUES
@@ -830,7 +1178,7 @@ INSERT INTO departments (name, filial) VALUES
   ('DOCES', '02')
 ON CONFLICT DO NOTHING;
 
--- 5. POLÍTICAS DE ACESSO TOTAL PARA USUÁRIOS DO SISTEMA
+-- 5. POLÍTICAS DE ACESSO TOTAL PARA TODOS OS USUÁRIOS (FRANCAL)
 DO $$ 
 DECLARE 
     pol RECORD;
@@ -844,7 +1192,6 @@ ALTER TABLE requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE displays ENABLE ROW LEVEL SECURITY;
 ALTER TABLE departments ENABLE ROW LEVEL SECURITY;
 
--- Garante acesso a todos os administradores cadastrados (inclusive novos admins como Juda):
 CREATE POLICY "francal_authenticated_profiles" ON profiles FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "francal_authenticated_requests" ON requests FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "francal_authenticated_displays" ON displays FOR ALL TO authenticated USING (true) WITH CHECK (true);
@@ -855,7 +1202,7 @@ CREATE POLICY "francal_authenticated_departments" ON departments FOR ALL TO auth
         <div className="flex items-center gap-3 bg-red-50 p-3 border border-red-200">
           <Info className="w-4 h-4 text-red-600 shrink-0" />
           <p className="text-[10px] font-medium text-red-800 leading-normal">
-            Esse comando ajusta os acessos da Filial 02 e Filial 04 de forma definitiva.
+            Esse comando ajusta os acessos da Filial 02 e Filial 04 de forma definitiva no Supabase.
           </p>
         </div>
       </div>

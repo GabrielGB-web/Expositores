@@ -1,8 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Package, Plus, Trash2, Camera, Loader2, AlertCircle, Building2, Tag, Check, Filter } from 'lucide-react';
+import { 
+  Package, 
+  Plus, 
+  Trash2, 
+  Camera, 
+  Loader2, 
+  AlertCircle, 
+  Building2, 
+  Tag, 
+  Check, 
+  Filter,
+  FileSpreadsheet,
+  Download,
+  UploadCloud,
+  Search,
+  FileDown
+} from 'lucide-react';
 import { Display, DEFAULT_DEPARTMENTS } from '../types';
 import { getDepartmentsForFilial, saveDepartmentForFilial, removeDepartmentForFilial } from '../lib/departments';
+import { normalizeFilial } from '../lib/staff';
+import ExcelImportModal from './ExcelImportModal';
+import { exportDisplaysToExcel, downloadExcelTemplate } from '../lib/excelDisplayUtils';
 
 interface DisplayManagerProps {
   initialFilial?: string;
@@ -24,6 +43,8 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
   const [isAddingNewDept, setIsAddingNewDept] = useState(false);
   const [newDeptName, setNewDeptName] = useState('');
   const [showDeptManager, setShowDeptManager] = useState(false);
+  const [showExcelImport, setShowExcelImport] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   // Independent state for Industry/Department Manager to NOT override form filial
   const [deptManagerFilial, setDeptManagerFilial] = useState<string>(initialFilial === 'TODAS' ? '04' : (initialFilial || '04'));
@@ -255,11 +276,21 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
     }
   };
 
-  // Displays filtered by selected filial
+  // Displays filtered by selected filial and search query
   const filteredDisplays = displays.filter(d => {
-    if (catalogFilialFilter === 'TODAS') return true;
-    const dFilial = d.filial || '04';
-    return dFilial === catalogFilialFilter;
+    const dFilial = normalizeFilial(d.filial);
+    const targetFilial = catalogFilialFilter === 'TODAS' ? 'TODAS' : normalizeFilial(catalogFilialFilter);
+    const matchesFilial = targetFilial === 'TODAS' || dFilial === targetFilial;
+
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return matchesFilial;
+
+    const matchesSearch = 
+      d.name?.toLowerCase().includes(term) ||
+      (d.code && d.code.toLowerCase().includes(term)) ||
+      (d.department && d.department.toLowerCase().includes(term));
+
+    return matchesFilial && matchesSearch;
   });
 
   if (loading) {
@@ -279,6 +310,61 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
           <button onClick={() => setSuccessFeedback(null)} className="underline text-[10px]">Fechar</button>
         </div>
       )}
+
+      {/* Excel Management & Report Hub */}
+      <section className="bg-white border-2 border-[#141414] p-5 sm:p-6 shadow-[8px_8px_0px_0px_rgba(20,20,20,1)]">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+          <div className="flex items-start gap-3.5">
+            <div className="p-3 bg-[#141414] text-white shrink-0 shadow-[2px_2px_0px_0px_rgba(20,20,20,0.3)]">
+              <FileSpreadsheet className="w-6 h-6 text-green-400" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-black uppercase text-base tracking-tight">
+                  Base de Expositores & Relatórios Excel
+                </h3>
+                <span className="font-mono text-[9px] bg-amber-100 text-amber-900 border border-amber-400 font-black px-1.5 py-0.5 uppercase">
+                  ADMINISTRADOR
+                </span>
+              </div>
+              <p className="text-xs text-[#141414]/75 mt-1 max-w-2xl font-medium leading-relaxed">
+                Importe planilhas Excel (<span className="font-mono bg-gray-100 px-1 border border-gray-300">.xlsx / .csv</span>) contendo as colunas <strong className="text-[#141414]">Código do Expositor, Nome, Quantidade, Departamento e Filial</strong>. Atualize o estoque em lote e extraia relatórios operacionais atualizados a qualquer momento.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setShowExcelImport(true)}
+              className="px-4 py-2.5 bg-[#141414] text-white font-black text-xs uppercase tracking-wider hover:bg-[#141414]/90 transition-all flex items-center gap-2 shadow-[3px_3px_0px_0px_rgba(20,20,20,0.3)] hover:shadow-none hover:translate-x-0.5 hover:translate-y-0.5"
+            >
+              <UploadCloud className="w-4 h-4 text-green-400" />
+              Importar Planilha Excel
+            </button>
+
+            <button
+              type="button"
+              onClick={() => exportDisplaysToExcel(displays, catalogFilialFilter)}
+              className="px-4 py-2.5 bg-green-700 hover:bg-green-800 text-white font-black text-xs uppercase tracking-wider transition-all flex items-center gap-2 shadow-[3px_3px_0px_0px_rgba(20,20,20,0.3)] hover:shadow-none hover:translate-x-0.5 hover:translate-y-0.5"
+              title="Baixar planilha Excel com os dados dos expositores cadastrados"
+            >
+              <FileDown className="w-4 h-4" />
+              Exportar Relatório (.xlsx)
+            </button>
+
+            <button
+              type="button"
+              onClick={downloadExcelTemplate}
+              className="px-3.5 py-2.5 border-2 border-[#141414] hover:bg-gray-100 text-[#141414] font-black text-xs uppercase tracking-wider transition-all flex items-center gap-1.5"
+              title="Baixar modelo oficial com as colunas corretas preenchidas"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Baixar Modelo
+            </button>
+          </div>
+        </div>
+      </section>
 
       {/* Add New Display Form */}
       <section className="bg-white border-2 border-[#141414] p-6 shadow-[8px_8px_0px_0px_rgba(20,20,20,1)]">
@@ -540,13 +626,18 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
 
       {/* List Existing Displays */}
       <section className="bg-white border-2 border-[#141414] p-6 shadow-[8px_8px_0px_0px_rgba(20,20,20,1)]">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8 border-b-2 border-[#141414] pb-4">
-          <h2 className="text-xl font-black uppercase tracking-tighter flex items-center gap-2">
-            <Package className="w-6 h-6" />
-            Catálogo Atual
-          </h2>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 border-b-2 border-[#141414] pb-4">
+          <div>
+            <h2 className="text-xl font-black uppercase tracking-tighter flex items-center gap-2">
+              <Package className="w-6 h-6" />
+              Catálogo Atual & Estoque
+            </h2>
+            <p className="font-mono text-[9px] uppercase font-bold text-[#141414]/50 mt-0.5">
+              Exibindo {filteredDisplays.length} de {displays.length} modelos ({filteredDisplays.reduce((acc, d) => acc + d.stock, 0)} unidades no estoque)
+            </p>
+          </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
             {/* Filial filter buttons */}
             <div className="flex items-center gap-1 border-2 border-[#141414] p-1 bg-white">
               <span className="text-[8px] font-black uppercase text-[#141414]/40 px-2 flex items-center gap-1">
@@ -579,9 +670,39 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
               </button>
             </div>
 
-            <div className="font-mono text-[9px] uppercase font-bold text-[#141414]/40">
-              Total em estoque: {filteredDisplays.reduce((acc, d) => acc + d.stock, 0)} unidades
-            </div>
+            {/* Quick Export Button */}
+            <button
+              type="button"
+              onClick={() => exportDisplaysToExcel(displays, catalogFilialFilter)}
+              className="px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-900 border-2 border-green-600 font-mono text-[9px] font-black uppercase transition-all flex items-center gap-1.5"
+              title="Exportar dados da lista filtrada para planilha Excel"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-green-700" />
+              Exportar (.xlsx)
+            </button>
+          </div>
+        </div>
+
+        {/* Search Bar */}
+        <div className="mb-6">
+          <div className="relative">
+            <Search className="w-4 h-4 text-[#141414]/40 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="PESQUISAR EXPOSITOR POR CÓDIGO, NOME OU INDÚSTRIA..."
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-4 py-2.5 border-2 border-[#141414] font-mono text-xs uppercase font-bold outline-none bg-gray-50 focus:bg-white"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-[#141414]/50 hover:text-black"
+              >
+                LIMPAR
+              </button>
+            )}
           </div>
         </div>
 
@@ -638,13 +759,29 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
         {filteredDisplays.length === 0 && (
           <div className="text-center py-12 border-2 border-dashed border-[#141414]/10">
             <p className="text-xs font-black uppercase text-[#141414]/40 tracking-widest">
-              {catalogFilialFilter === 'TODAS'
-                ? 'O catálogo está vazio.'
-                : `Nenhum expositor cadastrado para a Filial ${catalogFilialFilter}. Use o formulário acima para cadastrar.`}
+              {searchTerm 
+                ? `Nenhum expositor encontrado para o termo "${searchTerm}".`
+                : (catalogFilialFilter === 'TODAS'
+                  ? 'O catálogo está vazio. Utilize o botão "Importar Planilha Excel" acima para carregar sua base.'
+                  : `Nenhum expositor cadastrado para a Filial ${catalogFilialFilter}. Use o formulário ou a importação Excel para cadastrar.`)}
             </p>
           </div>
         )}
       </section>
+
+      {/* Modal de Importação de Planilha Excel */}
+      <ExcelImportModal
+        isOpen={showExcelImport}
+        onClose={() => setShowExcelImport(false)}
+        existingDisplays={displays}
+        onImportComplete={async () => {
+          await fetchDisplays();
+          setShowExcelImport(false);
+          setSuccessFeedback('Base de expositores importada e atualizada com sucesso!');
+          setTimeout(() => setSuccessFeedback(null), 5000);
+        }}
+        currentFilial={catalogFilialFilter === 'TODAS' ? '04' : catalogFilialFilter}
+      />
     </div>
   );
 }

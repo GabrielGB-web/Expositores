@@ -18,6 +18,7 @@ export interface Profile {
   email: string;
   role: UserRole;
   filial?: string;
+  created_at?: string;
 }
 
 export interface Display {

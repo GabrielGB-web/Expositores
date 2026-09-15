@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { DisplayRequest, DEFAULT_DEPARTMENTS, RequestStatus } from '../types';
 import RequestCard from './RequestCard';
 import { getDepartmentsForFilial } from '../lib/departments';
+import { normalizeFilial } from '../lib/staff';
 
 interface RequestListProps {
   isAdmin?: boolean;
@@ -90,7 +91,7 @@ export default function RequestList({ isAdmin, userFilial = '04' }: RequestListP
       // Se não for admin, isolamento estrito: só vê solicitações da sua filial e/ou feitas por ele
       const finalData = isAdmin 
         ? formatted 
-        : formatted.filter(r => (r.filial || '04') === (userFilial || '04') || r.user_id === session.user.id);
+        : formatted.filter(r => normalizeFilial(r.filial) === normalizeFilial(userFilial) || r.user_id === session.user.id);
 
       setRequests(finalData as DisplayRequest[]);
     } catch (err: any) {
@@ -197,8 +198,9 @@ export default function RequestList({ isAdmin, userFilial = '04' }: RequestListP
 
   const filteredRequests = requests.filter(r => {
     // Filial filter
-    const currentFilial = r.filial || '04';
-    const matchesFilial = filialFilter === 'TODAS' || currentFilial === filialFilter;
+    const currentFilial = normalizeFilial(r.filial);
+    const targetFilial = filialFilter === 'TODAS' ? 'TODAS' : normalizeFilial(filialFilter);
+    const matchesFilial = targetFilial === 'TODAS' || currentFilial === targetFilial;
 
     // Search term
     const matchesSearch = 
