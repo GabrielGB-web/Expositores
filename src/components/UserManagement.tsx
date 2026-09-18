@@ -1192,10 +1192,10 @@ ALTER TABLE requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE displays ENABLE ROW LEVEL SECURITY;
 ALTER TABLE departments ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "francal_authenticated_profiles" ON profiles FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "francal_authenticated_requests" ON requests FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "francal_authenticated_displays" ON displays FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "francal_authenticated_departments" ON departments FOR ALL TO authenticated USING (true) WITH CHECK (true);`}
+CREATE POLICY "francal_authenticated_profiles" ON profiles FOR ALL TO public USING (true) WITH CHECK (true);
+CREATE POLICY "francal_authenticated_requests" ON requests FOR ALL TO public USING (true) WITH CHECK (true);
+CREATE POLICY "francal_authenticated_displays" ON displays FOR ALL TO public USING (true) WITH CHECK (true);
+CREATE POLICY "francal_authenticated_departments" ON departments FOR ALL TO public USING (true) WITH CHECK (true);`}
           </pre>
         </div>
         

@@ -3,6 +3,7 @@ import { Send, AlertCircle, Loader2, Check, Package, Info, Filter, Building2, Ba
 import { supabase } from '../lib/supabase';
 import { Display, DEFAULT_DEPARTMENTS } from '../types';
 import { getDepartmentsForFilial } from '../lib/departments';
+import { fetchUnifiedDisplays } from '../lib/displays';
 
 interface RequestFormProps {
   onSuccess: () => void;
@@ -52,12 +53,7 @@ export default function RequestForm({ onSuccess, userFilial = '04', isAdmin = fa
     async function fetchDisplays() {
       try {
         setFetching(true);
-        const { data, error: err } = await supabase
-          .from('displays')
-          .select('*')
-          .order('name', { ascending: true });
-        
-        if (err) throw err;
+        const data = await fetchUnifiedDisplays();
         setDisplays(data || []);
       } catch (err: any) {
         console.error("Error fetching displays:", err);

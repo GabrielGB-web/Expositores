@@ -21,6 +21,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { saveDepartmentForFilial } from '../lib/departments';
 import { normalizeFilial } from '../lib/staff';
+import { saveUnifiedDisplay } from '../lib/displays';
 
 interface ExcelImportModalProps {
   isOpen: boolean;
@@ -126,7 +127,8 @@ export default function ExcelImportModal({
         }
       }
 
-      // 2. Processa cada linha no Supabase
+      // 2. Processa cada linha com persistência unificada (Supabase + Firestore)
+      let rlsCount = 0;
       for (let i = 0; i < validRows.length; i++) {
         const row = validRows[i];
         setImportProgress({ current: i + 1, total: validRows.length });
@@ -139,50 +141,35 @@ export default function ExcelImportModal({
           return sameFilial && (sameCode || sameName);
         });
 
-        if (existing) {
-          // Atualiza dados e soma ou atualiza estoque
-          const { error: updateErr } = await supabase
-            .from('displays')
-            .update({
-              name: row.name,
-              code: row.code || existing.code,
-              stock: row.quantity, // Define o novo estoque importado da base
-              department: row.department || existing.department,
-              min_order_value: row.min_order_value > 0 ? row.min_order_value : (existing.min_order_value || 0),
-              filial: row.filial
-            })
-            .eq('id', existing.id);
+        const displayData = {
+          name: row.name,
+          code: row.code || (existing ? existing.code : ''),
+          stock: row.quantity, // Define o novo estoque importado da base
+          department: row.department || (existing ? existing.department : 'ELMA CHIPS'),
+          min_order_value: row.min_order_value > 0 ? row.min_order_value : (existing ? (existing.min_order_value || 0) : 0),
+          filial: row.filial,
+          image_url: existing?.image_url || DEFAULT_DISPLAY_IMAGE
+        };
 
-          if (updateErr) {
-            console.warn(`Erro ao atualizar linha ${row.rowNumber}:`, updateErr);
-            skipped++;
-          } else {
+        const res = await saveUnifiedDisplay(displayData, Boolean(existing), existing?.id);
+        if (res.success) {
+          if (existing) {
             updated++;
-          }
-        } else {
-          // Insere novo expositor
-          const { error: insertErr } = await supabase
-            .from('displays')
-            .insert([{
-              name: row.name,
-              code: row.code,
-              stock: row.quantity,
-              department: row.department,
-              min_order_value: row.min_order_value,
-              filial: row.filial,
-              image_url: DEFAULT_DISPLAY_IMAGE
-            }]);
-
-          if (insertErr) {
-            console.warn(`Erro ao inserir linha ${row.rowNumber}:`, insertErr);
-            skipped++;
           } else {
             inserted++;
           }
+          if (res.supabaseRlsBlocked) {
+            rlsCount++;
+          }
+        } else {
+          skipped++;
         }
       }
 
       setImportResult({ inserted, updated, skipped });
+      if (rlsCount > 0) {
+        setErrorMessage(`Importação salva na nuvem (${inserted + updated} itens ativos), mas ${rlsCount} itens tiveram bloqueio de RLS no Supabase. Execute o comando SQL no SQL Editor do Supabase.`);
+      }
       await onImportComplete();
     } catch (err: any) {
       console.error('Falha durante importação:', err);
